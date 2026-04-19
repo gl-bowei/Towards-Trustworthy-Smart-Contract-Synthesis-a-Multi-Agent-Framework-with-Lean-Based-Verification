@@ -1,35 +1,54 @@
 # LeVer: Trustworthy Smart Contract Synthesis with Lean-Based Verification
 
-> Official repository for **"Towards Trustworthy Smart Contract Synthesis: A Multi-Agent Framework with Lean-Based Verification."**
+<p align="center">
+  <b>Official repository for</b><br>
+  <i>Towards Trustworthy Smart Contract Synthesis: A Multi-Agent Framework with Lean-Based Verification</i><br>
+  <b>ACL 2026 Main Conference</b>
+</p>
 
-LeVer is a multi-agent framework for generating trustworthy smart contracts from natural-language requirements. It combines LLM-based Solidity synthesis, Lean-based auto-formalization, formal proof search, and adversarial sandbox testing in a closed-loop refinement pipeline.
+<p align="center">
+  <b>Bowei Zhang</b>, Hanbing Liu, Qixin Tian, Siyu Chen, Ziyuan Wang, Qi Qi
+</p>
 
-> **Repository status:** the codebase is currently being cleaned and organized for public release. 
+<p align="center">
+  <img alt="status" src="https://img.shields.io/badge/status-coming%20soon-orange">
+  <img alt="venue" src="https://img.shields.io/badge/ACL-2026-blue">
+  <img alt="type" src="https://img.shields.io/badge/research-prototype-purple">
+</p>
+
+> LeVer is a multi-agent framework for generating **trustworthy smart contracts** from natural-language requirements.  
+> It integrates **LLM-based Solidity synthesis**, **Lean-based auto-formalization**, **formal proof search**, and **adversarial sandbox testing** into a closed-loop refinement pipeline.
+
+> [!IMPORTANT]
+> The codebase is currently being cleaned and organized for public release.
+
 ---
 
-## Why LeVer?
+## Overview
 
-Large language models make smart contract development easier, but generated contracts are difficult to trust. Since smart contracts are immutable after deployment and often directly manage financial assets, even subtle logic errors can cause irreversible losses.
+Large language models make smart contract development much more accessible, but generated contracts remain difficult to trust. Since smart contracts are immutable after deployment and often directly manage financial assets, even subtle logic errors can lead to irreversible losses.
 
-LeVer addresses this trust gap by combining two complementary assurance mechanisms:
+LeVer addresses this trust gap through two complementary assurance mechanisms:
 
-1. **Formal verification with Lean 4** - selected safety properties are translated into Lean theorems and checked by the Lean compiler.
-2. **Adversarial dynamic testing** - an attacker agent searches for concrete exploit traces in a sandbox environment, especially for properties that are hard to prove statically.
+- **Formal verification with Lean 4**: selected safety properties are translated into Lean theorems and checked in a theorem-proving environment.
+- **Adversarial dynamic testing**: an attacker agent searches for concrete exploit traces in a sandbox environment, especially for behaviors that are difficult to verify statically.
 
-Together, these components allow contracts to be generated, verified, attacked, repaired, and re-verified in an iterative loop.
+By combining these two mechanisms, LeVer supports an iterative workflow in which contracts are **generated, verified, attacked, repaired, and re-verified**.
 
 ---
 
-## Framework Overview
+## Framework
 
-![](Framework_new_01.png)
+<p align="center">
+  <img src="Framework_new_01.png" alt="LeVer Framework" width="95%">
+</p>
 
-At a high level, LeVer consists of four roles:
+At a high level, LeVer is built around four collaborative roles:
 
-| Component | Role |
+| Component | Description |
 |---|---|
-| **Coder Agent** | Generates Solidity contracts from requirements and repairs them using verifier/attacker feedback. |
-| **Verifier Agent** | Extracts safety properties, auto-formalizes Solidity logic into Lean, and attempts to prove theorems. |
+| **Coder Agent** | Generates Solidity contracts from user requirements and repairs them based on verifier and attacker feedback. |
+| **Verifier Agent** | Extracts safety properties, auto-formalizes Solidity logic into Lean, and attempts to prove the corresponding theorems. |
 | **Attacker Agent** | Simulates adversarial transaction sequences to discover concrete exploits and counterexamples. |
 | **Analyst** | Converts failed proofs and attack traces into structured repair feedback and new formal properties. |
 
@@ -37,11 +56,20 @@ At a high level, LeVer consists of four roles:
 
 ## Key Features
 
-- **Closed-loop synthesis and repair**: generated contracts are repeatedly refined using proof failures and attack traces.
-- **Lean-based auto-formalization**: Solidity storage, execution context, inputs, and transition logic are modeled as functional Lean definitions.
-- **Property-driven security assurance**: vulnerabilities are addressed through safety invariants rather than only pattern matching.
-- **Attack-to-property refinement**: concrete exploits found by the attacker are distilled into new formal properties for future verification.
-- **Dual assurance**: formal proofs provide mathematical guarantees for selected properties, while dynamic attacks improve empirical robustness.
+- **Closed-loop synthesis and repair**  
+  Generated contracts are iteratively refined using both proof failures and discovered attack traces.
+
+- **Lean-based auto-formalization**  
+  Solidity storage, execution context, inputs, and transition logic are translated into functional Lean definitions.
+
+- **Property-driven assurance**  
+  Security is framed through formal safety invariants rather than relying only on vulnerability pattern matching.
+
+- **Attack-to-property refinement**  
+  Concrete exploits discovered during dynamic testing are distilled into new formal properties for subsequent verification.
+
+- **Dual assurance mechanism**  
+  Formal proofs provide mathematical guarantees for selected properties, while adversarial testing improves empirical robustness against complex attacks.
 
 ---
 
@@ -50,36 +78,9 @@ At a high level, LeVer consists of four roles:
 If you find this work useful, please cite:
 
 ```bibtex
-@misc{lever2026,
-  title        = {Towards Trustworthy Smart Contract Synthesis: A Multi-Agent Framework with Lean-Based Verification},
-  author       = {Anonymous},
-  year         = {2026},
-  note         = {Under review}
+@inproceedings{zhang2026lever,
+  title     = {Towards Trustworthy Smart Contract Synthesis: A Multi-Agent Framework with Lean-Based Verification},
+  author    = {Bowei Zhang and Hanbing Liu and Qixin Tian and Siyu Chen and Ziyuan Wang and Qi Qi},
+  booktitle = {Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (ACL 2026)},
+  year      = {2026}
 }
-```
-
-The citation will be updated after publication.
-
----
-
-## Security Notice
-
-LeVer is a research prototype. Generated or verified smart contracts should **not** be deployed with real funds without independent review, testing, and professional security auditing.
-
----
-
-## License
-
-The open-source license will be added before the official code release. Suggested options include:
-
-- MIT or Apache-2.0 for framework code;
-- CC BY 4.0 or a dataset-specific license for documentation and released benchmark artifacts.
-
-Please update this section according to the final release policy.
-
----
-
-## Contact
-
-For questions, please open a GitHub issue after the repository is public.
-
