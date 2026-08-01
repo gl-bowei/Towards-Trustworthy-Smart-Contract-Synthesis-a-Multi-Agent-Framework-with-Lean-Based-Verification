@@ -157,7 +157,7 @@ def workflow_from_requirement(ctx, agents, tools, requirement, mode, max_iters=3
                 passed=True,
                 max_iters=max_iters,
                 model=model,
-                reason="original core iteration criteria passed",
+                reason="legacy_core_lenient criteria passed",
             )
             return True
 
@@ -190,7 +190,7 @@ def workflow_modern_verification(
     raw_prompt = dataset_item.get("prompt", "")
     user_targets = build_dataset_targets(dataset_item)
 
-    print(f"\n🚀 STARTING CASE: {contract_name}")
+    print(f"\nSTARTING CASE: {contract_name}")
 
     # Initialize the simulation_env layout required by forge build.
     # At this point, create only base files such as foundry.toml, not mocks.
@@ -219,21 +219,21 @@ def workflow_modern_verification(
                     )
 
             if reused_target_path and os.path.exists(reused_target_path):
-                print(f"   📌 Reusing frozen Target.sol: {reused_target_path}")
+                print(f"   Reusing frozen Target.sol: {reused_target_path}")
                 with open(reused_target_path, "r", encoding="utf-8") as f:
                     ctx.solidity_code = f.read()
                 ctx.checkpoint.save_stage("solidity_code", ctx.solidity_code)
                 ctx.checkpoint.save_stage("reused_target_path", os.path.abspath(reused_target_path))
             elif ctx.checkpoint.has_stage("solidity_code"):
-                print("   ⏩ Resuming from checkpoint...")
+                print("   Resuming from checkpoint...")
                 ctx.solidity_code = ctx.checkpoint.load_stage("solidity_code")
             else:
                 ctx.solidity_code = agents['coder'].generate_modern_code(raw_prompt)
                 if is_plausible_solidity_source(ctx.solidity_code):
                     ctx.checkpoint.save_stage("solidity_code", ctx.solidity_code)
         else:
-            # Fix Loop based on feedback
-            print("1️⃣  Fixing Code based on feedback...")
+            # Repair the candidate after a failed iteration.
+            print("Fixing Code based on feedback...")
             constraints = ctx.feedback_constraints + [f"Enforce property: {p}" for p in ctx.security_patches]
             fix_req = f"""
             Refactor the [CURRENT CODE] to fix security issues identified in [CONSTRAINTS].
@@ -247,7 +247,7 @@ def workflow_modern_verification(
                 ctx.checkpoint.save_stage("solidity_code", ctx.solidity_code)
 
         if not is_plausible_solidity_source(ctx.solidity_code):
-            print("   🛑 Critical: SolidityCoder returned empty or structurally invalid Solidity. Aborting this case.")
+            print("   Critical: SolidityCoder returned empty or structurally invalid Solidity. Aborting this case.")
             ctx.checkpoint.clear_stage("solidity_code")
             failure_path = os.path.join(ctx.workspace, "codegen_failure.json")
             with open(failure_path, "w", encoding="utf-8") as f:
@@ -263,14 +263,16 @@ def workflow_modern_verification(
         # Keep a backup at the workspace root as well.
         backup_path = os.path.join(ctx.workspace, "Target.sol")
 
-        with open(target_save_path, "w", encoding="utf-8") as f: f.write(ctx.solidity_code)
-        with open(backup_path, "w", encoding="utf-8") as f: f.write(ctx.solidity_code)
-        print(f"   💾 Target.sol saved to: {target_save_path}")
+        with open(target_save_path, "w", encoding="utf-8") as f:
+            f.write(ctx.solidity_code)
+        with open(backup_path, "w", encoding="utf-8") as f:
+            f.write(ctx.solidity_code)
+        print(f"   Target.sol saved to: {target_save_path}")
 
         # =================================================================================
         # === Step 1.5: compilation guard and automatic repair ===
         # =================================================================================
-        print("   🛡️  Verifying Compilation (Syntax Check)...")
+        print("   Verifying Compilation (Syntax Check)...")
         compilation_success = False
         compilation_retries = 0
         max_comp_retries = 3
@@ -282,13 +284,13 @@ def workflow_modern_verification(
             success, log = tools['simulator'].check_compilation()
 
             if success:
-                print("      ✅ Compilation Passed.")
+                print("      Compilation Passed.")
                 compilation_success = True
                 break
             else:
                 compilation_retries += 1
-                print(f"      ❌ Compilation Failed (Attempt {compilation_retries}/{max_comp_retries})")
-                print(f"      📝 Error Log Summary: {log[:500]}...") # Print only the first 500 characters.
+                print(f"      Compilation Failed (Attempt {compilation_retries}/{max_comp_retries})")
+                print(f"      Error Log Summary: {log[:500]}...") # Print only the first 500 characters.
 
                 # Ask the coder to repair compilation errors immediately.
                 fix_prompt = f"""
@@ -308,11 +310,13 @@ def workflow_modern_verification(
                 ctx.solidity_code = agents['coder'].generate_code(fix_prompt, ["Fix Compilation Errors"])
 
                 # Save the repaired source again.
-                with open(target_save_path, "w", encoding="utf-8") as f: f.write(ctx.solidity_code)
-                with open(backup_path, "w", encoding="utf-8") as f: f.write(ctx.solidity_code)
+                with open(target_save_path, "w", encoding="utf-8") as f:
+                    f.write(ctx.solidity_code)
+                with open(backup_path, "w", encoding="utf-8") as f:
+                    f.write(ctx.solidity_code)
 
         if not compilation_success:
-            print(f"   🛑 Critical: Failed to compile Target.sol after {max_comp_retries} attempts. Aborting this iteration.")
+            print(f"   Critical: Failed to compile Target.sol after {max_comp_retries} attempts. Aborting this iteration.")
             # Skip later stages after repeated compilation failures and let the
             # outer workflow retry or terminate.
             ctx.feedback_constraints.append("Fix Critical Compilation Errors")
@@ -332,18 +336,20 @@ def workflow_modern_verification(
         )
 
         if is_safe:
-            print(f"✅ Case {contract_name} passed verification at iteration {ctx.iteration}.")
-            break
+            print(f"Case {contract_name} passed verification at iteration {ctx.iteration}.")
+            return True
         else:
             harness_issue_record = ctx.checkpoint.load_stage("last_harness_issue") or {}
             if harness_issue_record.get("iteration") == ctx.iteration:
                 print(
-                    f"🧰 Case {contract_name} stopped after harness/infrastructure issue at "
+                    f"Case {contract_name} stopped after harness/infrastructure issue at "
                     f"iteration {ctx.iteration}; target repair is intentionally skipped."
                 )
-                break
-            print(f"🔄 Case {contract_name} failed. Retrying...")
+                return False
+            print(f"Case {contract_name} failed. Retrying...")
             ctx.checkpoint.clear_stage("definitions_code")
+
+    return False
 
 def workflow_full_generation(
     ctx,
@@ -363,17 +369,17 @@ def workflow_full_generation(
 
         # Step 1: Code Gen
         if ctx.checkpoint.has_stage("solidity_code") and ctx.iteration == 1:
-             print("   ⏩ Resuming: Loaded Initial Code.")
-             ctx.solidity_code = ctx.checkpoint.load_stage("solidity_code")
+            print("   Resuming: Loaded Initial Code.")
+            ctx.solidity_code = ctx.checkpoint.load_stage("solidity_code")
         else:
-             print("1️⃣  Generating Solidity Code...")
-             # Supply accumulated security patches as coder constraints.
-             constraints = ctx.feedback_constraints + [f"Enforce property: {p}" for p in ctx.security_patches]
-             ctx.solidity_code = agents['coder'].generate_code(user_req, constraints)
-             ctx.checkpoint.save_stage("solidity_code", ctx.solidity_code)
+            print("Generating Solidity Code...")
+            # Supply accumulated security patches as coder constraints.
+            constraints = ctx.feedback_constraints + [f"Enforce property: {p}" for p in ctx.security_patches]
+            ctx.solidity_code = agents['coder'].generate_code(user_req, constraints)
+            ctx.checkpoint.save_stage("solidity_code", ctx.solidity_code)
 
         # Save the target in the source directory.
-        tools['verifier'].save_file("../src/Target.sol", ctx.solidity_code)
+        tools['simulator'].save_file("src/Target.sol", ctx.solidity_code)
 
         if not run_common_pipeline(
             ctx,
@@ -385,10 +391,12 @@ def workflow_full_generation(
             run_llm_audit=run_llm_audit,
             run_slither=run_slither,
         ):
-            print("   🔄 Triggering Regeneration...")
+            print("   Triggering Regeneration...")
             ctx.checkpoint.clear_stage("solidity_code")
         else:
-            break
+            return True
+
+    return False
 
 def workflow_check_and_fix(
     ctx,
@@ -414,17 +422,15 @@ def workflow_check_and_fix(
 
         # Regenerate the code after a failed prior iteration.
         if ctx.iteration > 1:
-             print("1️⃣  Regenerating Fixed Code...")
-             # Repair the initial code using accumulated constraints.
-             req = f"Refactor and fix the following contract. Improve security based on constraints.\n\n[ORIGINAL CODE]\n{initial_code}"
-             constraints = ctx.feedback_constraints + [f"Fix vulnerability: {p}" for p in ctx.security_patches]
-             ctx.solidity_code = agents['coder'].generate_code(req, constraints)
-             ctx.checkpoint.save_stage("solidity_code", ctx.solidity_code)
+            print("Regenerating Fixed Code...")
+            # Repair the initial code using accumulated constraints.
+            req = f"Refactor and fix the following contract. Improve security based on constraints.\n\n[ORIGINAL CODE]\n{initial_code}"
+            constraints = ctx.feedback_constraints + [f"Fix vulnerability: {p}" for p in ctx.security_patches]
+            ctx.solidity_code = agents['coder'].generate_code(req, constraints)
+            ctx.checkpoint.save_stage("solidity_code", ctx.solidity_code)
 
-        # Ensure that the target directory exists.
-        os.makedirs(os.path.join(ctx.workspace, "simulation_env", "src"), exist_ok=True)
-        # Keep a workspace-level backup.
-        with open(os.path.join(ctx.workspace, "Target.sol"), "w") as f:
+        tools['simulator'].save_file("src/Target.sol", ctx.solidity_code)
+        with open(os.path.join(ctx.workspace, "Target.sol"), "w", encoding="utf-8") as f:
             f.write(ctx.solidity_code)
 
         if not run_common_pipeline(
@@ -437,20 +443,19 @@ def workflow_check_and_fix(
             run_llm_audit=run_llm_audit,
             run_slither=run_slither,
         ):
-            print("   🔄 Vulnerability found. Fixing in next iteration...")
+            print("   Vulnerability found. Fixing in next iteration...")
             ctx.checkpoint.clear_stage("solidity_code")
         else:
-            break
+            return True
+
+    return False
 
 def workflow_audit_only(ctx, agents, tools, target_code, skip_proofs, ablation_mode="full", run_llm_audit=True, run_slither=True):
     ctx.iteration = 1
-    print(f"\n======== AUDIT RUN (Mode: Audit Only) ========")
+    print("\n======== AUDIT RUN (Mode: Audit Only) ========")
 
     ctx.solidity_code = target_code
-    # Save Target.sol so the architect can inspect its interface.
-    os.makedirs(os.path.join(ctx.workspace, "simulation_env", "src"), exist_ok=True)
-    with open(os.path.join(ctx.workspace, "simulation_env", "src", "Target.sol"), "w") as f:
-        f.write(target_code)
+    tools['simulator'].save_file("src/Target.sol", target_code)
 
     success = run_common_pipeline(
         ctx,
@@ -465,6 +470,7 @@ def workflow_audit_only(ctx, agents, tools, target_code, skip_proofs, ablation_m
     )
 
     if success:
-        print("\n✅ Audit Result: NO VULNERABILITIES FOUND.")
+        print("\nAudit result: configured criteria passed.")
     else:
-        print("\n❌ Audit Result: VULNERABILITIES DETECTED.")
+        print("\nAudit result: configured criteria failed.")
+    return success

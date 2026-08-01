@@ -47,7 +47,7 @@ def prove_single_theorem_with_retry(prover_agent, verifier_tool, definitions_cod
 
             # 3. Construct the complete source file.
             if full_text_pattern not in definitions_code:
-                 raise ValueError(f"Pattern '{full_text_pattern[:20]}...' not found in definitions.")
+                raise ValueError(f"Pattern '{full_text_pattern[:20]}...' not found in definitions.")
 
             target_proof_def = full_text_pattern.replace(":= sorry", f":=\n{proof_script}")
             full_file_content = definitions_code.replace(full_text_pattern, target_proof_def)
@@ -59,22 +59,23 @@ def prove_single_theorem_with_retry(prover_agent, verifier_tool, definitions_cod
             errors = verifier_tool.verify_file(fname)
 
             if not errors:
-                print(f"   ✅ {thm_name} PROVEN! (Attempt {attempt+1})")
+                print(f"   {thm_name} PROVEN! (Attempt {attempt+1})")
                 return (True, thm_name, None)
 
             # 5. Prepare error feedback for the next attempt.
             # Remove irrelevant warnings and retain actual errors.
             real_errors = [e for e in errors if "warning" not in e.lower()]
-            if not real_errors: real_errors = errors
+            if not real_errors:
+                real_errors = errors
 
             short_error = "\n".join(real_errors[:5])
             current_error = f"Attempt {attempt+1} Code:\n{proof_script}\n\nCompiler Output:\n{short_error}"
 
-            print(f"   ⚠️ {thm_name} Failed Attempt {attempt+1}. Retrying...")
+            print(f"   {thm_name} Failed Attempt {attempt+1}. Retrying...")
 
         except Exception as e:
             current_error = f"System Exception: {str(e)}"
-            print(f"   ⚠️ {thm_name} System Error: {e}")
+            print(f"   {thm_name} System Error: {e}")
 
-    print(f"   ❌ {thm_name} Failed after {max_retries} attempts.")
+    print(f"   {thm_name} Failed after {max_retries} attempts.")
     return (False, thm_name, current_error)

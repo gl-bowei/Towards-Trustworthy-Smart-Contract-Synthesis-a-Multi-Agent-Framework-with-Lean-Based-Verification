@@ -1,15 +1,13 @@
 import os
-# pipeline/config.py
 
 # PUBLIC LOCAL-TEST KEYS ONLY. Never fund or use these accounts on a live network.
 # Anvil default mnemonic: "test test test test test test test test test test test junk"
 # Derived using standard path "m/44'/60'/0'/0/x".
 
-# pipeline/config.py
 RPC_URL = os.getenv("FOUNDRY_ETH_RPC_URL", "http://127.0.0.1:8545")
 
 ANVIL_CONFIG = {
-    "rpc_url": RPC_URL ,
+    "rpc_url": RPC_URL,
     "accounts": {
         "Deployer": {
             "role": "SYSTEM_DEPLOYER",
@@ -38,7 +36,6 @@ ANVIL_CONFIG = {
             "private_key": "0xdbda1821b80551c9d6596375f539d69396146a10a701c14533085f38a9562436",
             "address": "0xC1922C99D6158fEc868aD1289aec0be2F129C35C"
         }
-        # Removed accounts: Charlie, Dave, and Eve.
     }
 }
 

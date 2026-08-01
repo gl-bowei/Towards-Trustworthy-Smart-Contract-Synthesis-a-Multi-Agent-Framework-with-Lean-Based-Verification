@@ -3,9 +3,10 @@ import re
 import json
 import time
 from openai import OpenAI
-from typing import Dict, List, Tuple
-from core.logger import GLOBAL_LOGGER  # <--- IMPORT LOGGER
-from core.config import ANVIL_CONFIG, get_simulation_agents
+from typing import Dict, List, Optional, Tuple
+
+from core.config import get_simulation_agents
+from core.logger import GLOBAL_LOGGER
 
 # ==========================================
 # Configuration
@@ -13,7 +14,6 @@ from core.config import ANVIL_CONFIG, get_simulation_agents
 API_KEY = os.getenv("LLM_API_KEY")
 BASE_URL = os.getenv("LLM_BASE_URL")
 DEFAULT_MODEL_NAME = "gpt-5"
-FLASH_MODEL_NAME = "gpt-5"
 
 
 class FatalLLMError(RuntimeError):
@@ -50,7 +50,7 @@ class BaseAgent:
         self.request_timeout = float(os.getenv("LLM_REQUEST_TIMEOUT", "120"))
 
         if not self.api_key:
-            print("⚠️ Warning: No API Key provided for agent.")
+            print("Warning: No API Key provided for agent.")
 
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url) if self.api_key else None
 
@@ -250,8 +250,6 @@ class BaseAgent:
             generated_code or "",
         )
 
-    # [In agents.py]
-
     def _query_llm(self, system_prompt: str, user_prompt: str) -> str:
         max_attempts = int(os.getenv("LLM_MAX_RETRIES", "4"))
         retry_delay = float(os.getenv("LLM_RETRY_BASE_DELAY", "5"))
@@ -267,24 +265,21 @@ class BaseAgent:
                     ],
                     **self._completion_kwargs(),
                 )
-                raw_content = response.choices[0].message.content
+                raw_content = response.choices[0].message.content or ""
 
-                # ======================================================
-                # Debug aid: print the raw response directly to the console.
-                # ======================================================
-                print(f"\n{'='*20} [RAW LLM OUTPUT START: {self.__class__.__name__}] {'='*20}")
-                print(raw_content)
-                print(f"{'='*20} [RAW LLM OUTPUT END] {'='*20}\n")
-                # ======================================================
+                if os.getenv("LEVER_PRINT_RAW_LLM_OUTPUT", "0").strip().lower() in {
+                    "1", "true", "yes", "on"
+                }:
+                    print(f"\n{'='*20} [RAW LLM OUTPUT START: {self.__class__.__name__}] {'='*20}")
+                    print(raw_content)
+                    print(f"{'='*20} [RAW LLM OUTPUT END] {'='*20}\n")
 
-                # Log to file (Existing logic)
                 GLOBAL_LOGGER.log_agent(self.__class__.__name__, user_prompt, raw_content)
 
-                # Return cleaned content
                 return self._clean_code(raw_content)
 
             except Exception as e:
-                error_msg = f"❌ LLM Error ({self.__class__.__name__}): {e}"
+                error_msg = f"LLM Error ({self.__class__.__name__}): {e}"
                 print(error_msg)
                 GLOBAL_LOGGER.log_system("LLM_ERROR", error_msg)
                 if is_fatal_llm_error(e):
@@ -299,7 +294,7 @@ class BaseAgent:
                 ])
                 if retryable and attempt < max_attempts:
                     sleep_s = retry_delay * attempt
-                    print(f"   ⏳ Retrying LLM call in {sleep_s:.1f}s ({attempt}/{max_attempts})...")
+                    print(f"   Retrying LLM call in {sleep_s:.1f}s ({attempt}/{max_attempts})...")
                     time.sleep(sleep_s)
                     continue
                 return ""
@@ -463,7 +458,7 @@ def format_semantic_obligations(obligations: List[Dict], include_low_confidence:
     return formatted
 
 # ==========================================
-# 1. Property Selector (Refined for JSON)
+# 1. Property Selector
 # ==========================================
 class PropertySelector(BaseAgent):
     def __init__(self, json_path="property.json", model_name: str = None, api_key: str = None, base_url: str = None):
@@ -476,7 +471,7 @@ class PropertySelector(BaseAgent):
     def _load_knowledge_base(self):
         """Load and flatten the JSON for prompting while building an index."""
         if not os.path.exists(self.json_path):
-            print(f"⚠️ Warning: {self.json_path} not found. Using empty base.")
+            print(f"Warning: {self.json_path} not found. Using empty base.")
             return
 
         try:
@@ -508,9 +503,15 @@ class PropertySelector(BaseAgent):
             self.knowledge_base_str = "\n".join(kb_lines)
 
         except Exception as e:
-            print(f"❌ Error loading property.json: {e}")
+            print(f"Error loading property.json: {e}")
 
-    def select_properties(self, solidity_code: str, user_targets: List[str], existing_properties: List[str] = []) -> List[str]:
+    def select_properties(
+        self,
+        solidity_code: str,
+        user_targets: List[str],
+        existing_properties: Optional[List[str]] = None,
+    ) -> List[str]:
+        existing_properties = existing_properties or []
         target_text = "\n".join([f"- [USER TARGET] {t}" for t in user_targets])
         preserved_text = "\n".join([f"- {p}" for p in existing_properties]) if existing_properties else "None"
 
@@ -555,7 +556,7 @@ class PropertySelector(BaseAgent):
         List relevant Property IDs only.
         """
 
-        print("   🧐 PropertySelector is identifying verification goals from JSON...")
+        print("   PropertySelector is identifying verification goals from JSON...")
         response = self._query_llm(system_prompt, user_prompt)
 
         # Parse returned IDs and recover complete records, including templates.
@@ -618,18 +619,17 @@ class PropertySelector(BaseAgent):
         return True
 
 # ==========================================
-# 2. Lean Formalizer (The Architect)
+# 2. Lean Formalizer
 # ==========================================
 class LeanFormalizer(BaseAgent):
     """
     Translates Solidity to Lean 4 Definitions & Theorem Statements.
-    [cite_start]Implements the "Unified Lean Modeling Style"[cite: 235].
-    DOES NOT PROVE THEOREMS (leaves them as 'sorry').
+    Produces theorem statements with `sorry` placeholders; proof generation is
+    handled by LeanProver.
     """
     def __init__(self, model_name: str = None, api_key: str = None, base_url: str = None):
         # Forward the API key and base URL to the base class.
         super().__init__(model_name=model_name, api_key=api_key, base_url=base_url)
-    # [In agents.py -> LeanFormalizer.formalize_definitions]
     def formalize_definitions(
         self,
         solidity_code: str,
@@ -1052,14 +1052,12 @@ class LeanFormalizer(BaseAgent):
            tautology theorems.
         """
 
-        print("   🏗️  LeanFormalizer is architecting the FSM & Theorems (Structured Mode)...")
+        print("   LeanFormalizer is architecting the FSM & Theorems (Structured Mode)...")
         return self._query_llm(system_prompt, user_prompt)
 
 # ==========================================
-# 3. Lean Prover (The Mathematician)
+# 3. Lean Prover
 # ==========================================
-# [In agents.py]
-
 class LeanProver(BaseAgent):
     def __init__(self, model_name: str = None, api_key: str = None, base_url: str = None):
         # Forward the API key and base URL to the base class.
@@ -1283,31 +1281,37 @@ class LeanProver(BaseAgent):
         """
 
         if error_feedback:
-            print(f"   🧮 LeanProver is FIXING proof...")
+            print("   LeanProver is repairing the proof...")
         else:
-            print(f"   🧮 LeanProver is proving specific target...")
+            print("   LeanProver is proving the selected target...")
 
         # Query through the base class, which removes <think> blocks via _clean_code.
         raw_response = self._query_llm(system_prompt, user_prompt)
 
         # Apply the original extraction logic as a compatibility safeguard.
         if hasattr(self, '_extract_proof'):
-             return self._extract_proof(raw_response)
+            return self._extract_proof(raw_response)
 
         # Use a simple fallback extraction when needed.
         if "```" in raw_response:
-             blocks = re.findall(r"```(?:lean4?|)\s*(.*?)```", raw_response, re.DOTALL)
-             if blocks: return blocks[-1].strip()
+            blocks = re.findall(r"```(?:lean4?|)\s*(.*?)```", raw_response, re.DOTALL)
+            if blocks:
+                return blocks[-1].strip()
 
         return raw_response.strip()
 # ==========================================
 # 4. Other Agents
 # ==========================================
 class SolidityCoder(BaseAgent):
-    def __init__(self, model_name=FLASH_MODEL_NAME, api_key=None, base_url=None):
+    def __init__(self, model_name=DEFAULT_MODEL_NAME, api_key=None, base_url=None):
         super().__init__(model_name=model_name, api_key=api_key, base_url=base_url)
 
-    def generate_code(self, requirements: str, constraints: List[str] = []) -> str:
+    def generate_code(
+        self,
+        requirements: str,
+        constraints: Optional[List[str]] = None,
+    ) -> str:
+        constraints = constraints or []
         constraint_text = "\n".join([f"- {c}" for c in constraints]) if constraints else "None"
 
         # Emphasize preservation of the original structure in the system prompt.
@@ -1343,7 +1347,7 @@ class SolidityCoder(BaseAgent):
 
         user_prompt = f"{requirements}\n\n[SECURITY CONSTRAINTS TO FIX]\n{constraint_text}\n"
 
-        print("   🤖 SolidityCoder is fixing code...")
+        print("   SolidityCoder is fixing code...")
         return self._query_llm(system_prompt, user_prompt)
     def generate_modern_code(self, legacy_prompt: str) -> str:
         """
@@ -1386,7 +1390,7 @@ class SolidityCoder(BaseAgent):
         DO NOT include any test code.
         """
 
-        print("   🤖 SolidityCoder is modernizing the legacy requirement to 0.8.20...")
+        print("   SolidityCoder is modernizing the legacy requirement to 0.8.20...")
         return self._query_llm(system_prompt, user_prompt)
 
 class AuditorAgent(BaseAgent):
@@ -1438,21 +1442,16 @@ class AuditorAgent(BaseAgent):
             }
 
 # ==========================================
-# 5. Environment Architect (Refined for Generalization)
+# 5. Environment Architect
 # ==========================================
 class EnvironmentArchitect(BaseAgent):
+    """Generate simulation artifacts from the target contract interface."""
+
     def __init__(self, model_name=None, api_key=None, base_url=None):
         super().__init__(model_name, api_key, base_url)
-    """
-    Generates the Simulation Environment dynamically based on the Target Contract.
-    Now capable of analyzing interfaces to guide the simulator.
-    """
 
     def extract_interface_description(self, solidity_code: str) -> str:
-        """
-        [NEW] Parses the Solidity code to extract a human-readable interface summary.
-        This serves as the 'Instruction Manual' for the Attacker Agent.
-        """
+        """Extract a human-readable interface summary for simulation agents."""
         system_prompt = """
         You are a Solidity Interface Analyzer.
         Your job is to extract a concise Interface Summary from the raw source code.
@@ -1476,7 +1475,7 @@ class EnvironmentArchitect(BaseAgent):
         """
         user_prompt = f"[TARGET CONTRACT]\n{solidity_code}"
 
-        print("   🔍 Architect is extracting contract interface...")
+        print("   Architect is extracting contract interface...")
         return self._query_llm(system_prompt, user_prompt)
 
     def generate_mocks(self, solidity_code: str, error_feedback: str = "") -> str:
@@ -1524,7 +1523,7 @@ class EnvironmentArchitect(BaseAgent):
 
         feedback = f"\n\n[PREVIOUS COMPILER ERROR]\n{error_feedback}" if error_feedback else ""
         user_prompt = f"[TARGET CONTRACT]\n{solidity_code}{feedback}\n\n[OUTPUT] Mocks.sol code block."
-        print("   🏗️  Architect is designing Mocks...")
+        print("   Architect is designing Mocks...")
         return self._normalize_erc721_mock_approval(
             self._normalize_solidity_code(self._query_llm(system_prompt, user_prompt))
         )
@@ -1666,7 +1665,7 @@ class EnvironmentArchitect(BaseAgent):
 
         user_prompt = f"[TARGET]\n{solidity_code}\n\n[PROPERTIES]\n{props_text}"
 
-        print("   ⚖️  Architect is drafting Safety Rules & Check Script using Templates...")
+        print("   Architect is drafting Safety Rules & Check Script using Templates...")
         response = self._query_llm(system_prompt, user_prompt)
 
         try:
@@ -1678,7 +1677,7 @@ class EnvironmentArchitect(BaseAgent):
             check_script_body = self._normalize_solidity_code(data.get("check_script_body", ""))
             return safety_rules_code, check_script_body
         except Exception as e:
-            print(f"   ❌ Error parsing Safety Rules: {e}")
+            print(f"   Error parsing Safety Rules: {e}")
             return "", "// Parsing failed, skipping checks"
 
     def _normalize_address_patterns(self, patterns: Dict[str, str]) -> Dict[str, str]:
@@ -1785,17 +1784,17 @@ class EnvironmentArchitect(BaseAgent):
         [SAFETY CODE]\n{safety_code}
         """
 
-        print("   🚀 Architect is configuring Deployment...")
+        print("   Architect is configuring Deployment...")
         response = self._query_llm(system_prompt, user_prompt)
 
         try:
             cleaned_json = response.replace("```json", "").replace("```", "").strip()
             data = json.loads(cleaned_json)
             script_code = self._normalize_solidity_code(data["script_code"])
-            print(f"   📜 [DEPLOY SCRIPT]:\n{script_code[:300]}...\n")
+            print(f"   [DEPLOY SCRIPT]:\n{script_code[:300]}...\n")
             return script_code, self._normalize_address_patterns(data.get("address_patterns", {}))
         except Exception as e:
-            print(f"   ❌ Error parsing Deployment config: {e}")
+            print(f"   Error parsing Deployment config: {e}")
             return "", {}
 
     # EnvironmentArchitect helper for interface extraction.
@@ -1816,13 +1815,13 @@ class EnvironmentArchitect(BaseAgent):
             - Output a COMPLETE replacement `Invariant.t.sol`, not a patch or fragment.
             - Do not change the target contract semantics; repair only the Foundry harness.
             - Preserve valid ghost-modeling decisions from the previous version where possible.
-	            - Ensure `targetSelector` uses `bytes4[]` dynamic array correctly.
-	            - Ensure imports are from `./Target.sol`.
-	            - Ensure all functions, loops, declarations, and contracts are syntactically complete.
-	            - Do not import `StdInvariant`, `Console`, or `forge-std/Console.sol`.
-	            - `InvariantTest` must inherit only `Test`; do not write `is Test, StdInvariant` or `is StdInvariant`.
-	            - Do not declare a public array and a manual getter with the same name.
-	            """
+                - Ensure `targetSelector` uses `bytes4[]` dynamic array correctly.
+                - Ensure imports are from `./Target.sol`.
+                - Ensure all functions, loops, declarations, and contracts are syntactically complete.
+                - Do not import `StdInvariant`, `Console`, or `forge-std/Console.sol`.
+                - `InvariantTest` must inherit only `Test`; do not write `is Test, StdInvariant` or `is StdInvariant`.
+                - Do not declare a public array and a manual getter with the same name.
+                """
 
         system_prompt = f"""
         You are an advanced Foundry Invariant Test Architect.
@@ -1849,20 +1848,20 @@ class EnvironmentArchitect(BaseAgent):
                5. If you must compute expected deltas before the call, store them in local variables only; do not write ghost state until success.
                6. On `catch`, leave ghost state unchanged or restore the full snapshot. Reverted calls must not produce ghost deltas.
 
-	        3. **Implement `contract InvariantTest is Test`**:
-	           - `setUp()`: Deploy Target and Handler.
-	           - **Fuzzer Configuration (CRITICAL)**: Use `targetSelector` to restrict calls *only* to the Handler.
-	           - **Invariants**: Write checks like `invariant_solvency()` comparing `target.var()` vs `handler.ghost_var()`.
+            3. **Implement `contract InvariantTest is Test`**:
+               - `setUp()`: Deploy Target and Handler.
+               - **Fuzzer Configuration (CRITICAL)**: Use `targetSelector` to restrict calls *only* to the Handler.
+               - **Invariants**: Write checks like `invariant_solvency()` comparing `target.var()` vs `handler.ghost_var()`.
 
         [CRITICAL IMPLEMENTATION DETAILS - DO NOT IGNORE]
         1. **File Imports**:
            - The target contract is ALWAYS located at `"./Target.sol"`.
-	           - **CORRECT**: `import {{ContractName}} from "./Target.sol";`
-	           - **WRONG**: `import "./BasicToken.sol";` (This file does not exist).
-	           - **CORRECT Foundry import**: `import "forge-std/Test.sol";`
-	           - **WRONG**: `import {{StdInvariant}} from "forge-std/Test.sol";`
-	           - **WRONG**: `import {{Console}} from "forge-std/Console.sol";`
-	           - Do not import or inherit `StdInvariant`; `Test` provides the needed invariant helpers in this project.
+               - **CORRECT**: `import {{ContractName}} from "./Target.sol";`
+               - **WRONG**: `import "./BasicToken.sol";` (This file does not exist).
+               - **CORRECT Foundry import**: `import "forge-std/Test.sol";`
+               - **WRONG**: `import {{StdInvariant}} from "forge-std/Test.sol";`
+               - **WRONG**: `import {{Console}} from "forge-std/Console.sol";`
+               - Do not import or inherit `StdInvariant`; `Test` provides the needed invariant helpers in this project.
 
         2. **Selector Initialization (Fixing Compilation Errors)**:
            - Solidity strictly distinguishes `bytes4[1]` (fixed) and `bytes4[]` (dynamic). `FuzzSelector` requires a DYNAMIC array.
@@ -1871,10 +1870,10 @@ class EnvironmentArchitect(BaseAgent):
            - **WRONG**: `selectors: [handler.action.selector]` (Causes implicit conversion error).
            - **CORRECT**:
              ```solidity
-	               bytes4[] memory selectors = new bytes4[](1);
-	               selectors[0] = handler.action.selector;
-	               targetSelector(FuzzSelector({{addr: address(handler), selectors: selectors}}));
-	             ```
+                   bytes4[] memory selectors = new bytes4[](1);
+                   selectors[0] = handler.action.selector;
+                   targetSelector(FuzzSelector({{addr: address(handler), selectors: selectors}}));
+                 ```
 
         3. **Ghost State Sync (ANTI-FALSE-POSITIVE RULES)**:
            - Always assume the Target might revert.
@@ -1890,8 +1889,8 @@ class EnvironmentArchitect(BaseAgent):
              }}
              ```
            - For arrays, record `uint256 oldLen = arr.length`; if reverting after an optimistic push, pop until `arr.length == oldLen`.
-	          - For duplicate recipients/users in one call, aggregate deltas per unique address before comparing, or update ghost state in the exact same order as the target only after success.
-	          - Do NOT snapshot per-recipient balances in an array indexed by call position if the same address may appear twice. That stale-snapshot pattern overwrites the first delta on duplicate recipients and creates false positives. Either choose unique recipients or use `ghost_balance[to] += qty` after the target call succeeds.
+              - For duplicate recipients/users in one call, aggregate deltas per unique address before comparing, or update ghost state in the exact same order as the target only after success.
+              - Do NOT snapshot per-recipient balances in an array indexed by call position if the same address may appear twice. That stale-snapshot pattern overwrites the first delta on duplicate recipients and creates false positives. Either choose unique recipients or use `ghost_balance[to] += qty` after the target call succeeds.
            - For transfers, aliasing is part of the EVM semantics. If `from == to`,
              the ghost balance for that address must match the target's actual
              self-transfer behavior; do not subtract and then add using two stale
@@ -1920,21 +1919,21 @@ class EnvironmentArchitect(BaseAgent):
            - Do not assert that a lazy `currentState` getter must always equal the timestamp-derived state after arbitrary fuzz warps. Many contracts update lifecycle state only when a mutating function runs. Only assert state/time consistency immediately after a transition action you performed, or use conservative one-way checks that cannot be invalidated by stale state.
            - Treat owner/admin configuration setters for caps, limits, thresholds, prices, rates, and max values as mutable policy changes, not as retroactive constraints on past actions. If your handler includes a setter that can lower a cap/limit after users already minted/claimed/deposited, do NOT write an invariant like `historicalUserCount <= currentCap`; that creates a false positive. Either omit that setter from the fuzz selector, make the wrapper keep the value non-decreasing relative to already-observed usage, or check the cap only as a wrapper-local pre/post property for the mint/buy/claim call that uses the current cap.
 
-	        4. **Loop Bounds (Fixing Type Errors)**:
-	           - When iterating over actors/users, ensure you compare the loop counter (`uint`) with a LENGTH (`uint`).
-	           - **WRONG**: `i < handler.actors(0)` (Comparing uint vs address -> Compiler Error).
-	           - **CORRECT**: `i < handler.actorsLength()` or expose a public count variable.
-	           - If you declare `address[] public actors;`, Solidity already creates `actors(uint256)`.
-	             Do NOT also define `function actors(uint256)` manually. If you need a manual getter,
-	             make the array private and name the getter `actorAt(uint256)`.
+            4. **Loop Bounds (Fixing Type Errors)**:
+               - When iterating over actors/users, ensure you compare the loop counter (`uint`) with a LENGTH (`uint`).
+               - **WRONG**: `i < handler.actors(0)` (Comparing uint vs address -> Compiler Error).
+               - **CORRECT**: `i < handler.actorsLength()` or expose a public count variable.
+               - If you declare `address[] public actors;`, Solidity already creates `actors(uint256)`.
+                 Do NOT also define `function actors(uint256)` manually. If you need a manual getter,
+                 make the array private and name the getter `actorAt(uint256)`.
 
-	        5. **You MUST use targetContract(address(handler)) in setUp() to ensure the Fuzzer ONLY interacts with the Handler. Do NOT allow direct calls to the Target, otherwise ghost variables will get out of sync."
+            5. **You MUST use targetContract(address(handler)) in setUp() to ensure the Fuzzer ONLY interacts with the Handler. Do NOT allow direct calls to the Target, otherwise ghost variables will get out of sync."
 
-	        6. **Foundry Base Contract Rules**:
-	           - `Handler` may inherit `Test` if it needs `vm`, `bound`, or `makeAddr`.
-	           - `InvariantTest` MUST inherit exactly `Test`.
-	           - Never write `contract InvariantTest is StdInvariant`; that loses `vm`, `makeAddr`, `assertEq`, and `assertLe`.
-	           - Never write `contract InvariantTest is Test, StdInvariant`; it can cause inheritance linearization errors.
+            6. **Foundry Base Contract Rules**:
+               - `Handler` may inherit `Test` if it needs `vm`, `bound`, or `makeAddr`.
+               - `InvariantTest` MUST inherit exactly `Test`.
+               - Never write `contract InvariantTest is StdInvariant`; that loses `vm`, `makeAddr`, `assertEq`, and `assertLe`.
+               - Never write `contract InvariantTest is Test, StdInvariant`; it can cause inheritance linearization errors.
 
         [CRITICAL: HANDLER ACTOR CONTEXT] When writing Handler functions with the useActor modifier:
         NEVER use msg.sender inside the handler function. vm.startPrank does NOT change msg.sender of the current execution frame.
@@ -1952,8 +1951,8 @@ class EnvironmentArchitect(BaseAgent):
         [PROPERTY APPLICABILITY]
         - Invariants must check behavior that is actually exposed by the target's public interface.
         - Do NOT assert ERC20/ERC721 standard behavior unless the target explicitly implements those interfaces or exposes the standard functions.
-	           - Do NOT assert accounting identities that your Handler cannot model exactly. If rounding, duplicates, or partial distribution are hard to model, either model them exactly or omit that invariant.
-	           - Do not include two wrappers for the same target function in the fuzz selector. Pick one conservative wrapper per target function; duplicate wrappers with different ghost semantics make root-cause analysis unreliable.
+               - Do NOT assert accounting identities that your Handler cannot model exactly. If rounding, duplicates, or partial distribution are hard to model, either model them exactly or omit that invariant.
+               - Do not include two wrappers for the same target function in the fuzz selector. Pick one conservative wrapper per target function; duplicate wrappers with different ghost semantics make root-cause analysis unreliable.
 
         [SEMANTIC OBLIGATION HANDLING]
         - If [SEMANTIC OBLIGATIONS] are provided, use them as scenario objectives for the Handler.
@@ -1991,26 +1990,26 @@ class EnvironmentArchitect(BaseAgent):
 
         [INSTRUCTION]
         Generate a robust Handler-based invariant test suite (`Invariant.t.sol`) for the target above.
-	        1. Use the [CRITICAL] selector initialization pattern (dynamic array).
-	           The array size must exactly match the assigned handler selectors; no unassigned selector slots.
-	        2. Ensure strictly import from "./Target.sol".
-	        3. Implement optimistic ghost accounting with revert recovery.
-	           Prefer commit-on-success ghost accounting to avoid false positives from reverted calls.
-	        4. Avoid comparing uint with address in loops.
-	        5. `InvariantTest` must inherit only `Test`; do not import/use `StdInvariant` or `Console`.
-	        6. Avoid public-array/manual-getter name collisions.
-		        7. Do not use stale per-index snapshots for duplicate recipients; use unique recipients or post-success `+=` ghost updates.
-		        8. Include at most one handler wrapper per target function in `targetSelector`.
-		        9. For feasible SEMANTIC obligations, include at least one independent safety invariant or wrapper-local assertion.
-		           Do not rely only on target-vs-ghost equality for solvency, backing, replay, or cap semantics.
-		           For caps/limits that can be changed by owner/admin setters, prefer wrapper-local assertions around the user action, or keep the setter out of `targetSelector`; do not make historical usage fail after a later admin cap decrease.
-		        10. For independent balance-sum invariants, sum over a unique
-		            actor/holder list exactly once. If `owner` is already inserted
-		            into that list, do not add `handler.owner()` separately.
-		        11. Never write `target.fn{{value: 0}}(...)` for zero-payment calls; write `target.fn(...)`.
-			        """
+            1. Use the [CRITICAL] selector initialization pattern (dynamic array).
+               The array size must exactly match the assigned handler selectors; no unassigned selector slots.
+            2. Ensure strictly import from "./Target.sol".
+            3. Implement optimistic ghost accounting with revert recovery.
+               Prefer commit-on-success ghost accounting to avoid false positives from reverted calls.
+            4. Avoid comparing uint with address in loops.
+            5. `InvariantTest` must inherit only `Test`; do not import/use `StdInvariant` or `Console`.
+            6. Avoid public-array/manual-getter name collisions.
+                7. Do not use stale per-index snapshots for duplicate recipients; use unique recipients or post-success `+=` ghost updates.
+                8. Include at most one handler wrapper per target function in `targetSelector`.
+                9. For feasible SEMANTIC obligations, include at least one independent safety invariant or wrapper-local assertion.
+                   Do not rely only on target-vs-ghost equality for solvency, backing, replay, or cap semantics.
+                   For caps/limits that can be changed by owner/admin setters, prefer wrapper-local assertions around the user action, or keep the setter out of `targetSelector`; do not make historical usage fail after a later admin cap decrease.
+                10. For independent balance-sum invariants, sum over a unique
+                    actor/holder list exactly once. If `owner` is already inserted
+                    into that list, do not add `handler.owner()` separately.
+                11. Never write `target.fn{{value: 0}}(...)` for zero-payment calls; write `target.fn(...)`.
+                    """
 
-        print("   🧪 Architect is designing Generic Handler-Based Invariant Tests...")
+        print("   Architect is designing Generic Handler-Based Invariant Tests...")
         return self._sanitize_fuzz_test(self._query_llm(system_prompt, user_prompt), target_code)
 
     def _sanitize_fuzz_test(self, code: str, target_code: str = "") -> str:
@@ -2327,11 +2326,11 @@ class EnvironmentArchitect(BaseAgent):
         Generate `SemanticProbe.t.sol` now.
         """
 
-        print("   🧭 Architect is designing Semantic Probe Tests...")
+        print("   Architect is designing Semantic Probe Tests...")
         return self._sanitize_semantic_probe_test(self._query_llm(system_prompt, user_prompt))
 
 # ==========================================
-# 6. Attack Analyst (Refined for Feedback Loop)
+# 6. Attack Analyst
 # ==========================================
 class AttackAnalyst(BaseAgent):
     """
@@ -2369,7 +2368,7 @@ class AttackAnalyst(BaseAgent):
         Provide the Analysis, Constraint, and new Property.
         """
 
-        print("   🧠 AttackAnalyst is determining root cause...")
+        print("   AttackAnalyst is determining root cause...")
         return self._query_llm(system_prompt, user_prompt)
 
     def analyze_attack_structured(self, logs: str) -> Dict:
@@ -2384,7 +2383,7 @@ class AttackAnalyst(BaseAgent):
         for a formal verifier to turn it into a theorem and for a Solidity coder to repair
         the root cause.
 
-	        [ROOT-CAUSE DISCIPLINE]
+            [ROOT-CAUSE DISCIPLINE]
         1. Prefer the concrete Foundry failing invariant, shrunk sequence, and trace over
            broad guesses from function names.
         2. If the log contains a `[FOUNDRY STRUCTURED SUMMARY]`, use it as the primary
@@ -2425,24 +2424,24 @@ class AttackAnalyst(BaseAgent):
            semantic evidence, or when that interface issue directly blocks the main
            positive path.
         8. If evidence points to the harness rather than the target, return a property with
-	           `"status": "harness_issue"` and a constraint that fixes the harness, not the contract.
+               `"status": "harness_issue"` and a constraint that fixes the harness, not the contract.
         9. In Foundry invariant logs, the `sender=` in a shrunk sequence is usually the
-	           caller of the Handler, not necessarily `msg.sender` seen by the Target. If the
-	           Handler wrapper uses `vm.prank(owner)`, `vm.startPrank(owner)`, or another
-	           explicit actor before calling the Target, treat the Target call as being made by
-	           that pranked actor. Do not classify an access-control failure solely because the
-	           shrunk sequence sender is not the owner.
+               caller of the Handler, not necessarily `msg.sender` seen by the Target. If the
+               Handler wrapper uses `vm.prank(owner)`, `vm.startPrank(owner)`, or another
+               explicit actor before calling the Target, treat the Target call as being made by
+               that pranked actor. Do not classify an access-control failure solely because the
+               shrunk sequence sender is not the owner.
         10. If a failing invariant compares Target state to Handler ghost state, first check
-	           whether the Handler has duplicate-recipient handling, revert-only commit, and one
-	           wrapper per Target function. If these are violated, classify as `harness_issue`
-	           unless there is an independent non-ghost semantic invariant or direct Target trace
-	           showing the same bug.
+               whether the Handler has duplicate-recipient handling, revert-only commit, and one
+               wrapper per Target function. If these are violated, classify as `harness_issue`
+               unless there is an independent non-ghost semantic invariant or direct Target trace
+               showing the same bug.
         11. Treat semantic-probe failures as harness issues when the evidence is caused by:
-	           wrong deployer/owner/governance identity, a mismatched custom-error selector while
-	           the required revert did occur, `vm.expectRevert` being consumed by helper contract
-	           creation or argument construction, or incorrect expected arithmetic units/remainders.
-	           Only classify a target bug when the trace shows the target successfully violating
-	           the semantic obligation after valid setup.
+               wrong deployer/owner/governance identity, a mismatched custom-error selector while
+               the required revert did occur, `vm.expectRevert` being consumed by helper contract
+               creation or argument construction, or incorrect expected arithmetic units/remainders.
+               Only classify a target bug when the trace shows the target successfully violating
+               the semantic obligation after valid setup.
         12. Treat mutable-policy invariant failures as harness issues when the shrunk sequence
            first performs successful historical usage, then an authorized admin/owner setter lowers
            a cap, limit, threshold, max, price, or rate, and the invariant fails only because it
@@ -2473,7 +2472,7 @@ class AttackAnalyst(BaseAgent):
         Return the JSON object only.
         """
 
-        print("   🧠 AttackAnalyst is producing structured diagnostic-to-property feedback...")
+        print("   AttackAnalyst is producing structured diagnostic-to-property feedback...")
         response = self._query_llm(system_prompt, user_prompt)
         try:
             return json.loads(response)
@@ -2716,7 +2715,7 @@ class AttackAnalyst(BaseAgent):
         Return the JSON object only.
         """
 
-        print("   🧠 AttackAnalyst is checking for unconfirmed semantic evidence...")
+        print("   AttackAnalyst is checking for unconfirmed semantic evidence...")
         response = self._query_llm(system_prompt, user_prompt)
         data = self._parse_semantic_suspicion_response(response)
         if not isinstance(data, dict):
@@ -2820,5 +2819,5 @@ class ResultSummarizer(BaseAgent):
         Generate the report.
         """
 
-        print(f"   📝 Summarizing results for {contract_name}...")
+        print(f"   Summarizing results for {contract_name}...")
         return self._query_llm(system_prompt, user_prompt)

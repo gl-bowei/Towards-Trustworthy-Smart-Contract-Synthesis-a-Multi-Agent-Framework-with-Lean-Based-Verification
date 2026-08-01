@@ -20,6 +20,6 @@ def cleanup_heavy_files(folder_path):
             if os.path.exists(target_path):
                 try:
                     shutil.rmtree(target_path)
-                    print(f"   🧹 Cleaned: {target_path}")
+                    print(f"   Cleaned: {target_path}")
                 except Exception as e:
-                    print(f"   ⚠️ Failed to clean {target_path}: {e}")
+                    print(f"   Failed to clean {target_path}: {e}")

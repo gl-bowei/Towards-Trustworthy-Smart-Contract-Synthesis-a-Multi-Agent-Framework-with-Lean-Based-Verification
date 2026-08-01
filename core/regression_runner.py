@@ -37,7 +37,7 @@ class RegressionTester:
         # 1. Extract the new deployment addresses.
         new_addrs = self.parse_deploy_output(deploy_stdout)
         if "TARGET" not in new_addrs:
-            self.logger("⚠️ Regression: Could not find TARGET address in deploy logs.")
+            self.logger("Regression: Could not find TARGET address in deploy logs.")
             return 0, 0, []
 
         # 2. Locate historical action scripts, excluding deployment and safety scripts.
@@ -48,7 +48,7 @@ class RegressionTester:
         total = 0
         results = []
 
-        self.logger(f"   🔄 Starting Regression Test on {len(scripts)} accumulated scripts...")
+        self.logger(f"   Starting Regression Test on {len(scripts)} accumulated scripts...")
 
         for script_path in scripts:
             script_name = os.path.basename(script_path)
@@ -121,9 +121,9 @@ class RegressionTester:
                 # regression script completed without an infrastructure failure.
                 if proc.returncode == 0:
                     passed += 1
-                    status = "✅ PASS"
+                    status = "PASS"
                 else:
-                    status = "❌ FAIL"
+                    status = "FAIL"
                     # proc.stderr contains diagnostic details for failures.
 
                 results.append(f"{script_name}: {status}")

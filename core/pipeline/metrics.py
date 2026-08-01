@@ -97,12 +97,9 @@ class MetricsTracker:
         self.stats["total_invariants"] = self.stats["passed_invariants"] + self.stats["broken_invariants"]
 
         # 2. Call Stats
-        try:
-            table_rows = re.findall(r"\|\s*Handler\s*\|\s*\w+\s*\|\s*(\d+)\s*\|\s*(\d+)", log_content)
-            for calls, reverts in table_rows:
-                self.stats["fuzz_calls"] += int(calls)
-        except:
-            pass
+        table_rows = re.findall(r"\|\s*Handler\s*\|\s*\w+\s*\|\s*(\d+)\s*\|\s*(\d+)", log_content)
+        for calls, _reverts in table_rows:
+            self.stats["fuzz_calls"] += int(calls)
 
     def update_from_agent_log(self, log_content):
         if "VULNERABILITY:" in log_content or "SUCCESS:" in log_content or "CRITICAL:" in log_content:

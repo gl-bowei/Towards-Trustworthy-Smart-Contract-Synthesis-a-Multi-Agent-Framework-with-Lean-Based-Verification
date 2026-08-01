@@ -2,7 +2,6 @@ import datetime
 import json
 import os
 import re
-import time
 from typing import Any, Dict, Optional
 
 
@@ -13,7 +12,12 @@ OPENAI_KEY_RE = re.compile(r"sk-[A-Za-z0-9_-]{12,}")
 
 
 def utc_timestamp() -> str:
-    return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return (
+        datetime.datetime.now(datetime.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def clean_ansi(text: str) -> str:

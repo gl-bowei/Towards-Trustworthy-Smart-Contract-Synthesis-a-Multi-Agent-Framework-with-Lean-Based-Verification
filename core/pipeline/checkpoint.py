@@ -9,8 +9,8 @@ class CheckpointManager:
             try:
                 with open(filepath, "r") as f:
                     self.data = json.load(f)
-            except:
-                pass
+            except (OSError, json.JSONDecodeError):
+                self.data = {}
 
     def save_stage(self, key, value):
         self.data[key] = value

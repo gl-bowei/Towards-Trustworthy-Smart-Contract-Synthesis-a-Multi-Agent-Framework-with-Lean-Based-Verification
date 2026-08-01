@@ -26,7 +26,7 @@ class FormalVerifier:
         """
         if not os.path.exists(self.project_root):
             label = "Lean Project" if self.mode == "lake" else "Lean Workspace"
-            print(f"   🛠️  Initializing {label} at {self.project_root}...")
+            print(f"   Initializing {label} at {self.project_root}...")
 
         os.makedirs(self.project_root, exist_ok=True)
         os.makedirs(self.source_dir, exist_ok=True)

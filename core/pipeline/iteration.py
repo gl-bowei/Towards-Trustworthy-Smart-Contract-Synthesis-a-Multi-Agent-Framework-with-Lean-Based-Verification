@@ -33,7 +33,7 @@ def run_common_pipeline(
     Run the common verification flow: Properties -> Formal -> Sim -> Analysis.
     Return True when the configured criteria pass, otherwise False.
     """
-    tracker = MetricsTracker() # Initialize Tracker
+    tracker = MetricsTracker()
     verifier_enabled = (not skip_proofs) and ablation_mode != "no_verifier"
     attacker_enabled = ablation_mode != "no_attacker"
     # Preserve the original core policy: formal results are non-blocking by
@@ -72,7 +72,7 @@ def run_common_pipeline(
     })
     # Step 2: Select Properties
     # Regenerate properties from the current code while preserving security patches.
-    print("2️⃣  Selecting Verification Properties...")
+    print("Selecting Verification Properties...")
     semantic_extractor = agents.get("semantic_extractor")
     if semantic_extractor:
         ctx.semantic_obligations = semantic_extractor.extract(ctx.solidity_code, user_targets)
@@ -95,7 +95,7 @@ def run_common_pipeline(
         })
         if ctx.semantic_obligations:
             names = ", ".join(o.get("id", "") for o in ctx.semantic_obligations)
-            print(f"   🧭 Semantic obligations: {names}")
+            print(f"   Semantic obligations: {names}")
     preserved_attack_properties = []
     for record in ctx.attack_properties:
         text = attack_property_to_text(record)
@@ -106,7 +106,7 @@ def run_common_pipeline(
         user_targets,
         ctx.semantic_property_texts + ctx.security_patches + preserved_attack_properties # Include accumulated security patches.
     )
-    print(f"   📋 Selected {len(ctx.properties)} Properties")
+    print(f"   Selected {len(ctx.properties)} Properties")
     ctx.checkpoint.save_stage("selected_properties", ctx.properties)
     event_logger.emit("properties_selected", {
         "count": len(ctx.properties),
@@ -126,13 +126,13 @@ def run_common_pipeline(
         formal_failures.append("PropertySelector selected no verification properties.")
 
     if not verifier_enabled:
-        print("   ⏩ SKIPPING Formal Verification Phase (Verifier disabled by ablation/legacy flag)...")
+        print("   SKIPPING Formal Verification Phase (Verifier disabled by ablation/legacy flag)...")
     else:
         # Step 3: Formalize
         lean_attempts = 0
         compilation_error = ""
 
-        print("3️⃣  Architecting Lean 4 Model...")
+        print("Architecting Lean 4 Model...")
         while lean_attempts < 4:
             theorem_budget = max(0, int(os.getenv("LEVER_LEAN_THEOREM_BUDGET", "0") or 0))
             definitions_code = agents['formalizer'].formalize_definitions(
@@ -152,7 +152,7 @@ def run_common_pipeline(
                 errors = tools['verifier'].verify_file("Definitions.lean")
 
             if not errors:
-                print("   ✅ Definitions compiled.")
+                print("   Definitions compiled.")
                 GLOBAL_LOGGER.log_system("COMPILATION_SUCCESS", "Definitions.lean compiled.")
                 ctx.checkpoint.save_stage("definitions_code", definitions_code)
                 lean_definitions_compiled = True
@@ -161,9 +161,9 @@ def run_common_pipeline(
                 lean_attempts += 1
                 compilation_error = "\n".join(errors[:5])
                 if validation_errors:
-                    print(f"   ❌ Lean Validation Error (Retrying {lean_attempts}/4)...")
+                    print(f"   Lean Validation Error (Retrying {lean_attempts}/4)...")
                 else:
-                    print(f"   ❌ Lean Compile Error (Retrying {lean_attempts}/4)...")
+                    print(f"   Lean Compile Error (Retrying {lean_attempts}/4)...")
 
         if not lean_definitions_compiled:
             formal_failures.append(f"Definitions.lean failed to compile: {compilation_error or 'unknown Lean error'}")
@@ -172,7 +172,7 @@ def run_common_pipeline(
         if lean_definitions_compiled and definitions_code and lean_attempts < 4:
             theorems_info = extract_theorems_info(definitions_code)
             lean_theorems_count = len(theorems_info)
-            print(f"4️⃣  Identified {len(theorems_info)} theorems. Starting Parallel Proof Generation...")
+            print(f"Identified {len(theorems_info)} theorems. Starting Parallel Proof Generation...")
 
             proof_results = []
             if not theorems_info and ctx.properties:
@@ -195,7 +195,7 @@ def run_common_pipeline(
                             ok, thm_name, error = future.result(timeout=300)
                         except Exception as e:
                             ok, thm_name, error = False, info.get("name", "unknown"), str(e)
-                            print(f"   ⚠️ Proof Error: {e}")
+                            print(f"   Proof Error: {e}")
 
                         proof_results.append({
                             "theorem": thm_name,
@@ -262,7 +262,7 @@ def run_common_pipeline(
         return formal_success
 
     # Step 5: Simulation & Fuzzing
-    print("5️⃣  Building Simulation Environment...")
+    print("Building Simulation Environment...")
     env = agents['architect']
     sim = tools['simulator']
 
@@ -279,13 +279,13 @@ def run_common_pipeline(
         sim.initialize_environment(ctx.solidity_code, mocks)
         success, log = sim.check_compilation()
         if success:
-            print("      ✅ Mocks/Target compiled.")
+            print("      Mocks/Target compiled.")
             break
-        print(f"      ❌ Mocks/Target compilation failed (Attempt {attempt+1}). Retrying...")
+        print(f"      Mocks/Target compilation failed (Attempt {attempt+1}). Retrying...")
         mocks_feedback = log
 
     # === [LOOP A] Safety Rules Generation ===
-    print("   🛡️  Generating Safety Rules...")
+    print("   Generating Safety Rules...")
     safety = ""
     check_logic = ""
     safety_feedback = ""
@@ -302,10 +302,10 @@ def run_common_pipeline(
         success, log = sim.check_compilation()
 
         if success:
-            print("      ✅ SafetyRules compiled.")
+            print("      SafetyRules compiled.")
             break
         else:
-            print(f"      ❌ SafetyRules compilation failed (Attempt {attempt+1}). Retrying...")
+            print(f"      SafetyRules compilation failed (Attempt {attempt+1}). Retrying...")
             safety_feedback = log # Pass compiler errors to the next attempt.
 
     # === [LOOP B] Deployment Script Generation ===
@@ -314,7 +314,7 @@ def run_common_pipeline(
     deploy_feedback = ""
 
     if attacker_enabled:
-        print("   🚀 Generating Deployment Script...")
+        print("   Generating Deployment Script...")
         for attempt in range(max_retries):
             deploy, regex = env.generate_deploy_script(ctx.solidity_code, mocks, safety, error_feedback=deploy_feedback)
 
@@ -327,16 +327,16 @@ def run_common_pipeline(
             success, log = sim.check_compilation()
 
             if success:
-                print("      ✅ Deploy Script compiled.")
+                print("      Deploy Script compiled.")
                 break
             else:
-                print(f"      ❌ Deploy Script compilation failed (Attempt {attempt+1}). Retrying...")
+                print(f"      Deploy Script compilation failed (Attempt {attempt+1}). Retrying...")
                 deploy_feedback = log
     else:
-        print("   ⏩ SKIPPING Deployment Script (Attacker disabled by ablation).")
+        print("   SKIPPING Deployment Script (Attacker disabled by ablation).")
 
     # === [LOOP C] Fuzz Test Generation ===
-    print("   🌪️  Generating Fuzz Tests...")
+    print("   Generating Fuzz Tests...")
     fuzz_code = ""
     fuzz_feedback = ""
     is_fuzz_ready = False
@@ -357,11 +357,11 @@ def run_common_pipeline(
         success, log = sim.check_fuzz_compilation(fuzz_code)
 
         if success:
-            print("      ✅ Fuzz Tests compiled.")
+            print("      Fuzz Tests compiled.")
             is_fuzz_ready = True
             break
         else:
-            print(f"      ❌ Fuzz Tests compilation failed (Attempt {attempt+1}). Retrying...")
+            print(f"      Fuzz Tests compilation failed (Attempt {attempt+1}). Retrying...")
             event_logger.emit("foundry_fuzz_harness_repair", {
                 "phase": "preflight",
                 "attempt": attempt + 1,
@@ -372,7 +372,7 @@ def run_common_pipeline(
             fuzz_feedback = log
 
     if not is_fuzz_ready:
-        print("   ⚠️ Fuzzing skipped due to compilation errors.")
+        print("   Fuzzing skipped due to compilation errors.")
         append_unique(ctx.feedback_constraints, "Fix generated Foundry invariant harness or target incompatibility; fuzzing must compile and run.")
 
     # === [LOOP D] Semantic Probe Generation (diagnostic, separate from paper Foundry metrics) ===
@@ -386,7 +386,7 @@ def run_common_pipeline(
     is_semantic_probe_ready = False
 
     if semantic_probe_enabled:
-        print("   🧭 Generating Semantic Probe Tests...")
+        print("   Generating Semantic Probe Tests...")
         for attempt in range(max_retries):
             previous_semantic_probe_code = semantic_probe_code
             semantic_probe_code = env.generate_semantic_probe_test(
@@ -400,11 +400,11 @@ def run_common_pipeline(
             success, log = sim.check_semantic_probe_compilation(semantic_probe_code)
 
             if success:
-                print("      ✅ Semantic Probe Tests compiled.")
+                print("      Semantic Probe Tests compiled.")
                 is_semantic_probe_ready = True
                 break
 
-            print(f"      ❌ Semantic Probe compilation failed (Attempt {attempt+1}). Retrying...")
+            print(f"      Semantic Probe compilation failed (Attempt {attempt+1}). Retrying...")
             event_logger.emit("semantic_probe_harness_repair", {
                 "phase": "preflight",
                 "attempt": attempt + 1,
@@ -415,9 +415,9 @@ def run_common_pipeline(
             semantic_probe_feedback = log
 
         if not is_semantic_probe_ready:
-            print("   ⚠️ Semantic probe skipped due to compilation errors.")
+            print("   Semantic probe skipped due to compilation errors.")
     else:
-        print("   ⏩ Semantic Probe skipped (disabled, no attacker, or no semantic obligations).")
+        print("   Semantic Probe skipped (disabled, no attacker, or no semantic obligations).")
 
     # === EXECUTION PHASE ===
     # All generated files passed compilation guards; begin the simulations.
@@ -429,7 +429,7 @@ def run_common_pipeline(
     # Mode 1: agent simulation for logic-level attacks.
     # ---------------------------------------------------------
     if attacker_enabled:
-        print("   ⚔️  [Mode 1] Agent-Based Simulation...")
+        print("   [Mode 1] Agent-Based Simulation...")
 
         # Execute the generated attack script.
         try:
@@ -448,7 +448,7 @@ def run_common_pipeline(
         is_safe_ai = attack_result.get("safe", False)
         logs_ai = attack_result.get("log", "")
     else:
-        print("   ⏩ [Mode 1] Agent-Based Simulation skipped (no_attacker ablation).")
+        print("   [Mode 1] Agent-Based Simulation skipped (no_attacker ablation).")
         attack_result = {
             "safe": True,
             "log": "SKIPPED_NO_ATTACKER_ABLATION",
@@ -494,7 +494,7 @@ def run_common_pipeline(
     })
 
     if not is_safe_ai:
-        print(f"   ⚠️ Agent Simulation Failed (Vulnerability Found).")
+        print("   Agent simulation reported a potential vulnerability.")
 
     # ---------------------------------------------------------
     # Mode 2: Foundry fuzzing and invariant checks.
@@ -503,14 +503,14 @@ def run_common_pipeline(
     logs_fuzz = "Skipped"
 
     if is_fuzz_ready:
-        print("   🌪️  [Mode 2] Running Foundry Fuzzing...")
+        print("   [Mode 2] Running Foundry Fuzzing...")
 
         # Execute the fuzzing stage.
         foundry_result = sim.run_foundry_fuzzing(fuzz_code)
         is_safe_fuzz = foundry_result.get("safe", False)
         logs_fuzz = foundry_result.get("log", "")
         if not foundry_result.get("foundry_compile_pass", False):
-            print("   🛠️ Foundry fuzz harness failed during test run. Attempting harness repair...")
+            print("   Foundry fuzz harness failed during test run. Attempting harness repair...")
             repair_feedback = logs_fuzz
             for repair_attempt in range(max_retries):
                 previous_fuzz_code = fuzz_code
@@ -592,7 +592,7 @@ def run_common_pipeline(
         logs_semantic_probe = semantic_probe_result.get("log", "")
 
         if not semantic_probe_result.get("semantic_probe_compile_pass", False):
-            print("   🛠️ Semantic probe failed during test run. Attempting probe repair...")
+            print("   Semantic probe failed during test run. Attempting probe repair...")
             repair_feedback = logs_semantic_probe
             for repair_attempt in range(max_retries):
                 previous_semantic_probe_code = semantic_probe_code
@@ -673,7 +673,7 @@ def run_common_pipeline(
     # Standard Correctness / External Audit Metrics
     # ---------------------------------------------------------
     if run_slither:
-        print("   🧰 Running Slither standard-correctness check...")
+        print("   Running Slither standard-correctness check...")
         target_path = os.path.join(sim.src_dir, "Target.sol")
         slither_result = run_slither_check(target_path)
         tracker.update_slither_result(slither_result, enabled=True)
@@ -681,7 +681,7 @@ def run_common_pipeline(
         tracker.update_slither_result({"slither_pass": None, "infra_broken": False}, enabled=False)
 
     if run_llm_audit:
-        print("   🕵️  Running LLM audit pass-rate check...")
+        print("   Running LLM audit pass-rate check...")
         audit_result = agents["auditor"].audit_contract(ctx.solidity_code, ctx.properties)
         tracker.update_llm_audit_result(audit_result, enabled=True)
         ctx.checkpoint.save_stage("llm_audit_result", audit_result)
@@ -777,7 +777,7 @@ def run_common_pipeline(
                 ctx.security_patches.append(property_text)
                 ctx.checkpoint.save_stage("attack_properties", ctx.attack_properties)
                 tracker.stats["attack_derived_properties"] = ctx.attack_properties
-                print(f"   🟡 Suspicious semantic evidence found: {property_text[:90]}...")
+                print(f"   Suspicious semantic evidence found: {property_text[:90]}...")
 
             constraint = suspicion_result.get("constraint", "")
             append_unique(ctx.feedback_constraints, constraint)
@@ -785,7 +785,7 @@ def run_common_pipeline(
                 append_unique(ctx.feedback_constraints, semantic_probe_pending_constraint)
             semantic_suspicion_blocks_success = os.getenv("LEVER_SUSPICION_ITERATES", "1").lower() not in {"0", "false", "no"}
         elif suspicion_result.get("suspicious"):
-            print("   🟡 Low-confidence semantic suspicion recorded, but it will not force iteration.")
+            print("   Low-confidence semantic suspicion recorded, but it will not force iteration.")
 
     # ---------------------------------------------------------
     # Result Processing: Saving Logs & Metrics
@@ -796,7 +796,7 @@ def run_common_pipeline(
     log_path = os.path.join(ctx.workspace, log_filename)
     with open(log_path, "w", encoding="utf-8") as f:
         f.write("\n".join(full_execution_log))
-    print(f"   📝 Detailed Logs saved to: {log_filename}")
+    print(f"   Detailed Logs saved to: {log_filename}")
 
     # 3. Save quantitative metrics as JSON.
     metrics_filename = f"metrics_iter_{ctx.iteration}.json"
@@ -826,7 +826,7 @@ def run_common_pipeline(
         "command_log_dir": structured_summary["command_log_dir"],
         "command_count": structured_summary["command_count"],
     })
-    print(f"   🧾 Structured summary saved to: {summary_filename}")
+    print(f"   Structured summary saved to: {summary_filename}")
 
     # ---------------------------------------------------------
     # Final Analysis & Feedback Loop
@@ -850,15 +850,15 @@ def run_common_pipeline(
 
     if is_safe:
         if attacker_enabled and tracker.stats.get("attack_infra_broken") and not is_safe_ai:
-            print("   🧰 Agent simulation unavailable; accepted under the original core policy because no breach was observed.")
-        print("\n✅ PIPELINE CRITERIA PASSED under legacy_core_lenient policy.")
+            print("   Agent simulation unavailable; accepted under the original core policy because no breach was observed.")
+        print("\nPIPELINE CRITERIA PASSED under legacy_core_lenient policy.")
         return True
     else:
         if not formal_success:
             if formal_blocks_dynamic:
-                print("   🚨 Formal verification did not prove all selected properties.")
+                print("   Formal verification did not prove all selected properties.")
             else:
-                print("   🧾 Formal verification incomplete; recorded separately and not blocking dynamic result.")
+                print("   Formal verification incomplete; recorded separately and not blocking dynamic result.")
 
         dynamic_failure = (
             (attacker_enabled and not is_safe_ai and not tracker.stats.get("attack_infra_broken"))
@@ -866,17 +866,17 @@ def run_common_pipeline(
         )
         if (semantic_suspicion_blocks_success or semantic_probe_blocks_success) and not dynamic_failure:
             if semantic_probe_blocks_success:
-                print("   🟡 Semantic probe evidence is strong enough to trigger another iteration.")
+                print("   Semantic probe evidence is strong enough to trigger another iteration.")
             if semantic_suspicion_blocks_success:
-                print("   🟡 Semantic suspicion is strong enough to trigger another iteration.")
+                print("   Semantic suspicion is strong enough to trigger another iteration.")
             return False
 
         if dynamic_failure:
             if os.getenv("LEVER_SKIP_FAILURE_ANALYSIS", "0").lower() in {"1", "true", "yes"}:
-                print("   ⏩ Skipping failure analysis/repair feedback by LEVER_SKIP_FAILURE_ANALYSIS.")
+                print("   Skipping failure analysis/repair feedback by LEVER_SKIP_FAILURE_ANALYSIS.")
                 return False
 
-            print("   🚨 Local diagnostic failure detected. Analyzing for feedback...")
+            print("   Local diagnostic failure detected. Analyzing for feedback...")
 
             # Combine stage logs for analyst review.
             foundry_structured_summary = {
@@ -927,7 +927,7 @@ def run_common_pipeline(
             attack_property = structured_analysis.get("property", {})
             property_status = str(attack_property.get("status", "")).lower() if attack_property else ""
             if property_status == "harness_issue":
-                print("   🧰 Analyst classified this as a harness/infrastructure issue; target code repair is not triggered.")
+                print("   Analyst classified this as a harness/infrastructure issue; target code repair is not triggered.")
                 tracker.stats["harness_issue"] = True
                 tracker.stats["harness_issue_analysis"] = structured_analysis
                 harness_issue_record = {
@@ -950,7 +950,7 @@ def run_common_pipeline(
                 )
                 no_attack_breach = tracker.stats.get("attack_breaches", 0) == 0
                 if foundry_clean and no_attack_breach:
-                    print("   ✅ Foundry is clean and no concrete attack breach was observed; treating this case as verified modulo harness issue.")
+                    print("   No Foundry failure or concrete attack breach was observed; accepted under the lenient policy despite the harness issue.")
                     return True
                 return False
 
@@ -969,7 +969,7 @@ def run_common_pipeline(
                     tracker.stats["attack_derived_properties"] = ctx.attack_properties
                     with open(metrics_path, "w", encoding="utf-8") as f:
                         json.dump(tracker.get_summary(), f, indent=2)
-                    print(f"   ➕ New Attack-Derived Property: {property_text[:80]}...")
+                    print(f"   New Attack-Derived Property: {property_text[:80]}...")
 
             constraint = structured_analysis.get("constraint", "")
             append_unique(ctx.feedback_constraints, constraint)
@@ -980,7 +980,7 @@ def run_common_pipeline(
                     new_prop = analysis.split("[PROPERTY]")[1].strip()
                     if new_prop not in ctx.security_patches:
                         ctx.security_patches.append(new_prop)
-                        print(f"   ➕ New Security Patch: {new_prop[:50]}...")
+                        print(f"   New Security Patch: {new_prop[:50]}...")
 
                 if "[CONSTRAINT]" in analysis:
                     con = analysis.split("[CONSTRAINT]")[1].split("[")[0].strip()

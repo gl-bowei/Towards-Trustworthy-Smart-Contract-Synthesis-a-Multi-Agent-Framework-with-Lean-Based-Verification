@@ -12,9 +12,9 @@ import urllib.request
 from urllib.parse import urlparse
 from typing import Dict, List, Tuple, Optional
 from openai import OpenAI
-from core.agents import API_KEY, BASE_URL, DEFAULT_MODEL_NAME, FLASH_MODEL_NAME, FatalLLMError, is_fatal_llm_error
+from core.agents import API_KEY, BASE_URL, DEFAULT_MODEL_NAME, FatalLLMError, is_fatal_llm_error
 from core.config import ANVIL_CONFIG # Local Anvil configuration.
-from core.structured_logging import CommandRecorder, JsonlEventLogger, parse_foundry_output, text_tail
+from core.structured_logging import CommandRecorder, JsonlEventLogger, parse_foundry_output, redact_secrets, text_tail
 
 class SimulationRunner:
     def __init__(self, root_dir="simulation_env", attack_rounds: Optional[int] = None):
@@ -93,7 +93,7 @@ class SimulationRunner:
                     raise
 
                 delay = base_delay * (attempt + 1)
-                print(f"         ⏳ Retrying LLM action call ({purpose}) in {delay:.1f}s ({attempt + 1}/{max_retries})...")
+                print(f"         Retrying LLM action call ({purpose}) in {delay:.1f}s ({attempt + 1}/{max_retries})...")
                 time.sleep(delay)
         raise last_error
 
@@ -250,7 +250,7 @@ class SimulationRunner:
             if self._owned_anvil_process.poll() is not None:
                 break
             if self._rpc_is_reachable():
-                print(f"   ⛓️  Started local anvil at {self.RPC_URL}")
+                print(f"   Started local anvil at {self.RPC_URL}")
                 if self.event_logger:
                     self.event_logger.emit(
                         "anvil_started",
@@ -325,7 +325,7 @@ class SimulationRunner:
             ]
             libs_line = 'libs = []\n'
         else:
-            print(f"   ⚠️ Shared Solidity libs not found at {shared_lib_path}; falling back to local lib remappings.")
+            print(f"   Shared Solidity libs not found at {shared_lib_path}; falling back to local lib remappings.")
             remappings = [
                 "@openzeppelin/=lib/openzeppelin-contracts/",
                 "forge-std/=lib/forge-std/src/",
@@ -371,7 +371,7 @@ class SimulationRunner:
                 f.write(content)
             restored.append(rel)
         if restored:
-            print(f"      🧩 Restored simulation sources: {', '.join(restored)}")
+            print(f"      Restored simulation sources: {', '.join(restored)}")
             if self.event_logger:
                 self.event_logger.emit("simulation_sources_self_healed", {"restored": restored})
         return restored
@@ -404,7 +404,7 @@ class SimulationRunner:
         if self.ANVIL_KEYS:
             env["PRIVATE_KEY"] = self.ANVIL_KEYS[0]
 
-        print(f"\n⚡ [CMD]: {cmd}")
+        print(f"\n[CMD]: {redact_secrets(cmd)}")
 
         self._prepare_foundry_dirs_for_command(cmd)
         timeout_s = float(timeout_s if timeout_s is not None else os.getenv("LEVER_COMMAND_TIMEOUT", "600"))
@@ -480,16 +480,16 @@ class SimulationRunner:
 
     def _describe_action_outcome(self, output_log: str) -> Tuple[str, str]:
         if output_log.startswith("[ACTION_CONFIRMED_ONCHAIN"):
-            return "confirmed", "✅ Action confirmed on-chain."
+            return "confirmed", "Action confirmed on-chain."
         if output_log.startswith("[ACTION_PARTIAL_EFFECT_OBSERVED]"):
-            return "partial_effect_observed", "🟡 Action ended unconfirmed, but semantic state-changing evidence was observed."
+            return "partial_effect_observed", "Action ended unconfirmed, but semantic state-changing evidence was observed."
         if output_log.startswith("[ACTION_SIMULATED_BROADCAST_FAILED]"):
-            return "simulated_broadcast_failed", "⚠️ Action simulated successfully, but broadcast failed."
+            return "simulated_broadcast_failed", "Action simulated successfully, but broadcast failed."
         if output_log.startswith("[ACTION_SIMULATION_FAILED_OR_REVERTED]"):
-            return "simulated_reverted", "🛡️ Action simulation reverted or failed; no confirmed on-chain state change."
+            return "simulated_reverted", "Action simulation reverted or failed; no confirmed on-chain state change."
         if output_log.startswith("[ATTACK REVERTED / DEFENSE SUCCESS]"):
-            return "simulated_reverted", "🛡️ Action reverted or was blocked."
-        return "unknown", "✅ Action completed."
+            return "simulated_reverted", "Action reverted or was blocked."
+        return "unknown", "Action completed."
 
     def _has_semantic_effect_evidence(self, output: str) -> bool:
         """Detect useful state-changing evidence hidden inside an unconfirmed script."""
@@ -1101,7 +1101,7 @@ class SimulationRunner:
         if os.getenv("LEVER_LIFECYCLE_SETUP", "1").lower() in {"0", "false", "no"}:
             return {"enabled": False, "status": "skipped"}
 
-        print("   🧭 Running lifecycle setup before agent scheduling...")
+        print("   Running lifecycle setup before agent scheduling...")
         deterministic_action = self._build_deterministic_lifecycle_action(addresses, interface_desc)
         use_deterministic = os.getenv("LEVER_DETERMINISTIC_LIFECYCLE", "1").lower() not in {"0", "false", "no"}
 
@@ -1134,7 +1134,7 @@ class SimulationRunner:
                 phase_context=self._build_lifecycle_setup_context(addresses),
                 initial_action_body=deterministic_action if use_deterministic else None,
             )
-            status, message = self._describe_action_outcome(output_log) if success else ("failed", "❌ Lifecycle setup failed.")
+            status, message = self._describe_action_outcome(output_log) if success else ("failed", "Lifecycle setup failed.")
             print(f"      [{account_name}] {message}")
             results.append({
                 "account": account_name,
@@ -1151,7 +1151,7 @@ class SimulationRunner:
                 break
 
         aggregate_status = "confirmed" if any_confirmed else ("no_confirmed_setup" if any_success else "failed")
-        message = "✅ Lifecycle setup attempts completed." if any_success else "❌ Lifecycle setup failed."
+        message = "Lifecycle setup attempts completed." if any_success else "Lifecycle setup failed."
         print(f"      {message}")
         return {
             "enabled": True,
@@ -1184,7 +1184,7 @@ class SimulationRunner:
         self.save_file("script/Deploy.s.sol", deploy_script)
 
         # 2. Deploy
-        print("   🌍 Deploying Simulation Environment...")
+        print("   Deploying Simulation Environment...")
         self._ensure_core_sources_present(("src/Target.sol", "src/Mocks.sol", "src/SafetyRules.sol", "script/Deploy.s.sol"))
         deployer_key = self.ANVIL_KEYS[0]
         cmd = f"forge script script/Deploy.s.sol --broadcast --rpc-url {self.RPC_URL} --private-key {deployer_key}"
@@ -1301,7 +1301,8 @@ class SimulationRunner:
         malicious_agents = []
 
         for name, data in self.accounts_config.items():
-            if name == "Deployer": continue
+            if name == "Deployer":
+                continue
             agent_obj = {
                 "name": name,
                 "role": data["role"],
@@ -1317,7 +1318,7 @@ class SimulationRunner:
         malicious_limit = max(0, int(os.getenv("LEVER_MALICIOUS_AGENTS", "2")))
         honest_agents = honest_agents[:honest_limit]
         malicious_agents = malicious_agents[:malicious_limit]
-        print(f"   👥 Agents Optimized: {len(honest_agents)} Honest, {len(malicious_agents)} Malicious")
+        print(f"   Configured agents: {len(honest_agents)} honest, {len(malicious_agents)} malicious")
 
         # Give each agent an independent string-based memory.
         agent_memories = {a['name']: "" for a in honest_agents + malicious_agents}
@@ -1328,12 +1329,12 @@ class SimulationRunner:
         TOTAL_ROUNDS = max(1, self.attack_rounds)
 
         for round_num in range(1, TOTAL_ROUNDS + 1):
-            print(f"\n   ⚔️  [Round {round_num}/{TOTAL_ROUNDS}] Simulation Starting...")
+            print(f"\n   [Round {round_num}/{TOTAL_ROUNDS}] Simulation Starting...")
             random.shuffle(honest_agents)
 
             for honest_idx, honest_agent in enumerate(honest_agents):
                 current_memory = agent_memories.get(honest_agent['name'], "")
-                print(f"      🧾 Planning pending honest intent: {honest_agent['name']} (Mem: {len(current_memory)} chars)")
+                print(f"      Planning pending honest intent: {honest_agent['name']} (Mem: {len(current_memory)} chars)")
                 planned_action, planned_memory = self._get_llm_action_body(
                     honest_agent,
                     addresses,
@@ -1386,7 +1387,7 @@ class SimulationRunner:
                             back_run_attempts += 1
 
                         current_memory = agent_memories.get(agent['name'], "")
-                        print(f"      👉 {phase_name}: {agent['name']} ({agent['role']}) acting... (Mem: {len(current_memory)} chars)")
+                        print(f"      {phase_name}: {agent['name']} ({agent['role']}) acting... (Mem: {len(current_memory)} chars)")
 
                         initial_action = planned_action if phase_name == "honest_action" else None
                         success, output_log, action_body, new_memory = self._run_agent_with_retry(
@@ -1403,10 +1404,10 @@ class SimulationRunner:
 
                         if new_memory:
                             agent_memories[agent['name']] = new_memory
-                            print(f"         🧠 Memory Updated.")
+                            print("         Memory updated.")
 
                         if action_body == "// SKIP":
-                            print(f"         💤 {agent['name']} decided to WAIT.")
+                            print(f"         {agent['name']} decided to WAIT.")
                             history.append(f"Round {round_num}-{phase_name}: {agent['name']} waited.")
                             continue
 
@@ -1415,7 +1416,7 @@ class SimulationRunner:
                             malicious_steps += 1
                             attack_episodes += 1
 
-                        script_section = f"📜 [FINAL SCRIPT]:\n{'-'*40}\n{action_body}\n{'-'*40}"
+                        script_section = f"[FINAL SCRIPT]:\n{'-'*40}\n{action_body}\n{'-'*40}"
                         log_entry = (
                             f"[Round {round_num}][Phase {phase_name}][{agent['name']}] Result: {success}\n"
                             f"PendingIntent:\n{json.dumps(pending_intent, indent=2)}\n"
@@ -1485,7 +1486,7 @@ class SimulationRunner:
                                         lifecycle_setup=lifecycle_setup,
                                         foundry_summary={"last_safety_check": safety_summary},
                                     )
-                                print(f"      🚨 INVARIANT VIOLATED immediately after {agent['name']}'s action!")
+                                print(f"      INVARIANT VIOLATED immediately after {agent['name']}'s action!")
                                 violation_reason = self._extract_revert_reason(s_err)
                                 breach_trace = (
                                     "!!! SAFETY VIOLATION DETECTED !!!\n"
@@ -1515,13 +1516,13 @@ class SimulationRunner:
                                     foundry_summary={"last_safety_check": safety_summary},
                                 )
                             else:
-                                print(f"      ✅ System remains safe.")
+                                print("      No invariant violation observed.")
                         else:
-                            print(f"         ❌ Action Failed!")
+                            print("         Action failed.")
                             logs.append(f"[Round {round_num}][Phase {phase_name}][{agent['name']}] FAILED:\n{script_section}\nERROR:\n{output_log}")
                             history.append(f"Round {round_num}-{phase_name}: {agent['name']} failed.")
 
-        print("\n   🏁 Simulation Ended. Final Safety Check passed.")
+        print("\n   Simulation ended; the configured final check passed.")
         return self._attack_result(
             True,
             "\n".join(logs),
@@ -1587,7 +1588,7 @@ class SimulationRunner:
                 if allow_skip and "// SKIP" in action_body:
                     return True, "SKIPPED", "// SKIP", next_memory
 
-                print(f"         📜 [EXECUTING SCRIPT (Attempt {current_retry + 1})]:\n{'-'*40}\n{action_body}\n{'-'*40}")
+                print(f"         [EXECUTING SCRIPT (Attempt {current_retry + 1})]:\n{'-'*40}\n{action_body}\n{'-'*40}")
 
                 # 2. Wrap the script and write it to disk.
                 self._ensure_core_sources_present()
@@ -1632,11 +1633,11 @@ class SimulationRunner:
                     execution_status = foundry_summary.get("execution_status", "command_failed")
                     partial_effect = self._has_semantic_effect_evidence(out)
                     if partial_effect:
-                        print("         🟡 Unconfirmed script contains state-changing semantic evidence.")
+                        print("         Unconfirmed script contains state-changing semantic evidence.")
                     if execution_status in {"broadcast_failed_insufficient_funds", "simulation_success_broadcast_failed"}:
-                        print(f"         ⚠️ Simulation succeeded but broadcast failed ({execution_status}). Stopping retries.")
+                        print(f"         Simulation succeeded but broadcast failed ({execution_status}). Stopping retries.")
                     else:
-                        print(f"         🛡️  Transaction reverted or simulation failed ({execution_status}). Stopping retries.")
+                        print(f"         Transaction reverted or simulation failed ({execution_status}). Stopping retries.")
                     trace_summary = self._extract_trace_section(out)
 
                     # Return True so the experiment continues, but preserve the
@@ -1652,11 +1653,13 @@ class SimulationRunner:
 
                 # Case D: generated code failed to compile; enter the retry loop.
                 current_retry += 1
-                print(f"         ⚠️ Syntax/Compiler Error (Attempt {current_retry}/{max_retries}). Retrying...")
-                print(f"         🗑️  Deleting broken script: {script_name}")
+                print(f"         Syntax/Compiler Error (Attempt {current_retry}/{max_retries}). Retrying...")
+                print(f"         Deleting broken script: {script_name}")
 
-                try: os.remove(script_path)
-                except: pass
+                try:
+                    os.remove(script_path)
+                except OSError:
+                    pass
 
                 # Send compiler feedback to the model for repair.
                 full_error_trace = f"STDOUT:\n{out}\nSTDERR:\n{err}"
@@ -1665,7 +1668,7 @@ class SimulationRunner:
             except FatalLLMError:
                 raise
             except Exception as e:
-                print(f"         ❌ System Error: {e}")
+                print(f"         System Error: {e}")
                 current_retry += 1
 
         # Return after exhausting retries, usually because syntax errors remain.
@@ -1678,8 +1681,10 @@ class SimulationRunner:
 
     def _extract_revert_reason(self, error_output: str) -> str:
         match = re.search(r"Error: script failed: (.*)", error_output)
-        if match: return match.group(1)
-        if "Revert reason:" in error_output: return error_output.split("Revert reason:")[1].strip()
+        if match:
+            return match.group(1)
+        if "Revert reason:" in error_output:
+            return error_output.split("Revert reason:")[1].strip()
         return "Unknown Revert"
 
     # Build the action prompt and parse the injected memory block.
@@ -1863,12 +1868,12 @@ class SimulationRunner:
             raise RuntimeError("No LLM API key configured. Set LLM_API_KEY or OPENAI_API_KEY.")
         response = self._chat_completion_with_retries(
             "agent_action",
-            model=FLASH_MODEL_NAME,
+            model=DEFAULT_MODEL_NAME,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            **self._llm_completion_kwargs(FLASH_MODEL_NAME),
+            **self._llm_completion_kwargs(DEFAULT_MODEL_NAME),
         ).choices[0].message.content
 
         # 5. Normalize the model output.
@@ -2355,7 +2360,7 @@ interface IERC721 {
         self._ensure_core_sources_present()
         with open(test_path, "w") as f:
             f.write(test_source)
-        print("   🌪️  [Mode 2] Running Foundry Invariant Campaign (Handler-Based)...")
+        print("   [Mode 2] Running Foundry Invariant Campaign (Handler-Based)...")
         fuzz_runs = int(os.getenv("LEVER_FUZZ_RUNS", "500"))
         cmd = f"forge test --offline --skip script --match-path {test_rel_path} -vvvv --fuzz-runs {fuzz_runs}"
         out, err, code = self._run_command(cmd, label="foundry_fuzz", kind="foundry_fuzz")
@@ -2363,7 +2368,7 @@ interface IERC721 {
         foundry_summary = parse_foundry_output(out, err, code)
         if code != 0:
             if "Compiler run failed" in combined:
-                print("   ⚠️ Fuzzing SKIPPED due to Compilation Error.")
+                print("   Fuzzing SKIPPED due to Compilation Error.")
                 return {
                     "safe": False,
                     "log": f"SKIPPED_COMPILATION_ERROR\n{combined}",
@@ -2374,7 +2379,7 @@ interface IERC721 {
                     "fuzz_runs": 0,
                     "foundry_summary": foundry_summary,
                 }
-            print("   🚨 INVARIANT BROKEN! Foundry found a sequence that breaks safety.")
+            print("   INVARIANT BROKEN! Foundry found a sequence that breaks safety.")
             fuzz_report = self._parse_fuzz_failure(out)
             return {
                 "safe": False,
@@ -2467,7 +2472,7 @@ interface IERC721 {
         self._ensure_core_sources_present()
         with open(test_path, "w") as f:
             f.write(test_source)
-        print("   🧭 [Diagnostic] Running Semantic Probe Tests...")
+        print("   [Diagnostic] Running Semantic Probe Tests...")
         moved = self._temporarily_disable_other_test_files("SemanticProbe.t.sol")
         try:
             cmd = f"forge test --offline --skip script --match-path {test_rel_path} -vvvv"
@@ -2480,7 +2485,7 @@ interface IERC721 {
         if code != 0:
             infra_broken = "Compiler run failed" in combined or foundry_summary.get("execution_status") == "compiler_failed"
             if infra_broken:
-                print("   ⚠️ Semantic probe skipped due to compilation error.")
+                print("   Semantic probe skipped due to compilation error.")
                 return {
                     "available": True,
                     "safe": None,
@@ -2492,7 +2497,7 @@ interface IERC721 {
                     "foundry_summary": foundry_summary,
                 }
 
-            print("   🟡 Semantic probe found requirement-level evidence.")
+            print("   Semantic probe found requirement-level evidence.")
             return {
                 "available": True,
                 "safe": False,
@@ -2578,9 +2583,6 @@ interface IERC721 {
         """
         cleaned_lines = []
         capture = True
-
-        # Track whether the summary table has ended.
-        seen_table_end = False
 
         for line in raw_output.split('\n'):
             # Stop collecting verbose stack details after the Traces section starts.
