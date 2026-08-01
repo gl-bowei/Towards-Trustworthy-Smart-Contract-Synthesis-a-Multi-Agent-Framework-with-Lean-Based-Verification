@@ -1,0 +1,427 @@
+{
+    "Level 1: Execution-Level & Language Safety": {
+      "description": "Base-level safety requirements that must be met at the EVM or compiler level, regardless of business logic.",
+      "categories": {
+        "1.1 Arithmetic Safety": {
+          "description": "Ensures numerical correctness under EVM constraints without unexpected mutations.",
+          "properties": [
+            {
+              "id": "L1.1-Overflow",
+              "name": "Integer Overflow/Underflow",
+              "invariant_template": "unchecked { require(b == 0 || c / b == a); } // For multiplication",
+              "description": "Verify arithmetic operations in `unchecked` blocks to prevent wrap-around behavior.",
+              "example_attack": "BEC Token batchTransfer overflow"
+            },
+            {
+              "id": "L1.1-DivZero",
+              "name": "Division/Modulo by Zero",
+              "invariant_template": "require(divisor != 0)",
+              "description": "Division by zero causes a Panic and transaction reversion.",
+              "example_attack": "Generic DoS via Revert"
+            },
+            {
+              "id": "L1.1-Precision",
+              "name": "Precision Loss",
+              "invariant_template": "(a * b) / c // Multiply before dividing",
+              "description": "Ensure operation order follows 'multiply before divide' to prevent integer truncation.",
+              "example_attack": "Financial miscalculation"
+            },
+            {
+              "id": "L1.1-Casting",
+              "name": "Casting Safety",
+              "invariant_template": "require(value <= type(uint8).max)",
+              "description": "Check value ranges when downcasting (e.g., uint256 to uint8) to prevent silent truncation.",
+              "example_attack": "Downcasting truncation exploit"
+            },
+            {
+              "id": "L1.1-Signed",
+              "name": "Signed Integer Issues",
+              "invariant_template": "require(value != type(int).min || divisor != -1)",
+              "description": "Prevent overflows when handling signed integers (e.g., INT_MIN / -1).",
+              "example_attack": "Signed integer overflow"
+            }
+          ]
+        },
+        "1.2 Resource & Memory Safety": {
+          "description": "Ensures the contract operates within limited computational resources (Gas, Stack, Memory).",
+          "properties": [
+            {
+              "id": "L1.2-GasDoS",
+              "name": "Out-of-Gas / Unbounded Loops",
+              "invariant_template": "loop_iterations < MAX_ITERATIONS",
+              "description": "Loops controlled by user input can exceed the Block Gas Limit, causing Denial of Service (DoS).",
+              "example_attack": "DoS with Block Gas Limit"
+            },
+            {
+              "id": "L1.2-UninitPtr",
+              "name": "Uninitialized Storage Pointers",
+              "invariant_template": "Struct memory s = Struct(x, y); // Explicit initialization",
+              "description": "Prevent uninitialized storage pointers from overwriting critical state variables (e.g., slot 0).",
+              "example_attack": "Honeypot / Owner overwrite"
+            },
+            {
+              "id": "L1.2-Shadowing",
+              "name": "Variable Shadowing",
+              "invariant_template": "local_var_name != state_var_name",
+              "description": "Prevent local variables from shadowing state variables to avoid incorrect state updates.",
+              "example_attack": "Incorrect state update"
+            }
+          ]
+        },
+        "1.3 Control Flow Integrity": {
+          "description": "Ensures execution paths are not hijacked, interrupted, or ignored unexpectedly.",
+          "properties": [
+            {
+              "id": "L1.3-Reentrancy",
+              "name": "Re-entrancy Protection",
+              "invariant_template": "lock == LOCKED || _internal_state_updated_before_call",
+              "description": "State changes must occur before external calls (CEI pattern), covering cross-function and read-only reentrancy.",
+              "example_attack": "The DAO Hack / Curve Read-only Reentrancy"
+            },
+            {
+              "id": "L1.3-UncheckedReturn",
+              "name": "Unchecked Return Values",
+              "invariant_template": "(bool success, ) = target.call(...); require(success);",
+              "description": "Return values from low-level `.call()` must be checked to prevent silent failures.",
+              "example_attack": "Silent failure in transfer"
+            },
+            {
+              "id": "L1.3-UnexpectedEther",
+              "name": "Unexpected Ether Handling",
+              "invariant_template": "invariant: totalDeposits <= address(this).balance",
+              "description": "Do not rely strictly on `address(this).balance` as `selfdestruct` can force Ether into the contract.",
+              "example_attack": "Ether game breaker"
+            },
+            {
+              "id": "L1.3-Delegatecall",
+              "name": "Delegatecall Safety",
+              "invariant_template": "assert(Layout(Proxy) == Layout(Implementation))",
+              "description": "Storage layouts of the proxy and implementation contracts must match exactly.",
+              "example_attack": "Parity MultiSig Hack / Storage Collision"
+            }
+          ]
+        },
+        "1.4 Interface Compliance": {
+          "description": "Ensures the contract and its external interactions follow consistent communication protocols.",
+          "properties": [
+            {
+              "id": "L1.4-ERCCompliance",
+              "name": "ERC Standard Compliance",
+              "invariant_template": "function transfer(...) returns (bool)",
+              "description": "Function parameters and return values must strictly adhere to EIP definitions.",
+              "example_attack": "Integration failure"
+            },
+            {
+              "id": "L1.4-NonStandardToken",
+              "name": "Non-Standard Token Compatibility",
+              "invariant_template": "SafeERC20.safeTransfer(token, to, amount)",
+              "description": "Handle non-standard tokens (like USDT missing return values) using SafeERC20.",
+              "example_attack": "USDT Transfer Revert"
+            }
+          ]
+        },
+        "1.5 Environment Dependency Safety": {
+          "description": "Ensures secure usage of blockchain environment parameters.",
+          "properties": [
+            {
+              "id": "L1.5-Timestamp",
+              "name": "Timestamp Dependence",
+              "invariant_template": "now > last_update + THRESHOLD",
+              "description": "`block.timestamp` can be manipulated by miners; do not use for precise randomness.",
+              "example_attack": "Miner manipulation / Gambling hack"
+            },
+            {
+              "id": "L1.5-TxOrigin",
+              "name": "Authorization via tx.origin",
+              "invariant_template": "require(msg.sender == authorized_account)",
+              "description": "Avoid `tx.origin` for authorization to prevent phishing/man-in-the-middle attacks.",
+              "example_attack": "Phishing / Man-in-the-middle contract"
+            }
+          ]
+        }
+      }
+    },
+    "Level 2: State Machine & Functional Correctness": {
+      "description": "Focuses on state changes before/after function calls (Pre/Post-conditions), global invariants, and state machine transitions.",
+      "categories": {
+        "2.1 State Machine Integrity & Lifecycle": {
+          "description": "The contract must be viewed as a Finite State Machine (FSM) with closed and compliant transitions.",
+          "properties": [
+            {
+              "id": "L2.1-Transitions",
+              "name": "Transition Validity & Irreversibility",
+              "invariant_template": "state == OLD_STATE implies next_state in ALLOWED_TRANSITIONS",
+              "description": "States must transition according to a predefined directed graph; critical states (e.g., Active -> Fail) are irreversible.",
+              "example_attack": "Resurrecting failed proposals"
+            },
+            {
+              "id": "L2.1-Mutex",
+              "name": "State Mutex",
+              "invariant_template": "!(isRefunded && isShipped)",
+              "description": "Logically mutually exclusive states cannot be true simultaneously.",
+              "example_attack": "Double spending state"
+            },
+            {
+              "id": "L2.1-InitFinality",
+              "name": "Initialization & Finality",
+              "invariant_template": "initialized == true; // set once",
+              "description": "Contracts must be initialized exactly once; critical state changes should stop in the final state.",
+              "example_attack": "Re-initialization / Parity Wallet Hack 1"
+            }
+          ]
+        },
+        "2.2 Access Control": {
+          "description": "Validates operator eligibility, spatiotemporal snapshots, and permission attribution.",
+          "properties": [
+            {
+              "id": "L2.2-RoleSeparation",
+              "name": "Role Separation & Least Privilege",
+              "invariant_template": "modifier onlyRole(BYTES_ROLE)",
+              "description": "Sensitive permissions should be separated to avoid single-point failure (admin rug pull).",
+              "example_attack": "Rug pull by admin"
+            },
+            {
+              "id": "L2.2-Snapshots",
+              "name": "Eligibility Snapshots",
+              "invariant_template": "votes = balanceAt(proposal.snapshotBlock)",
+              "description": "Permissions should depend on historical state (snapshots) rather than current state (to prevent flash loan attacks).",
+              "example_attack": "Flash loan governance attack"
+            },
+            {
+              "id": "L2.2-NoDoubleAction",
+              "name": "Double-Action Prevention",
+              "invariant_template": "require(!hasPerformed[id][msg.sender])",
+              "description": "The same credential cannot be used twice in the same context (e.g., double voting).",
+              "example_attack": "Double voting / Double claim"
+            }
+          ]
+        },
+        "2.3 Conservation & Isolation": {
+          "description": "Ensures conservation of asset/data totals and isolation between business domains.",
+          "properties": [
+            {
+              "id": "L2.3-Solvency",
+              "name": "Solvency & Supply Conservation",
+              "invariant_template": "sum(user_balances) <= total_assets",
+              "description": "Contract assets must equal or exceed user liabilities; token transfers must be lossless.",
+              "example_attack": "Insolvency / Infinite mint"
+            },
+            {
+              "id": "L2.3-Isolation",
+              "name": "Business Logic Isolation",
+              "invariant_template": "instanceA.data != instanceB.data",
+              "description": "Funds and states of different instances (e.g., in a Factory) must remain isolated.",
+              "example_attack": "Cross-instance fund draining"
+            }
+          ]
+        },
+        "2.4 Functional Correctness": {
+          "description": "Business logic complies with specifications, including math, conditions, and side effects.",
+          "properties": [
+            {
+              "id": "L2.4-PrePost",
+              "name": "Pre/Post-conditions",
+              "invariant_template": "old(bal) + amount == new(bal)",
+              "description": "Assumptions before execution and state changes after execution must hold true.",
+              "example_attack": "Logic error in accounting"
+            },
+            {
+              "id": "L2.4-SideEffects",
+              "name": "Side-effect Consistency",
+              "invariant_template": "emit Transfer(from, to, value)",
+              "description": "On-chain state changes must be accompanied by correct Event emissions.",
+              "example_attack": "Missing events breaking off-chain indexers"
+            }
+          ]
+        },
+        "2.5 Input Validity & System Constraints": {
+          "description": "The system must operate within safe boundaries and reject abnormal inputs.",
+          "properties": [
+            {
+              "id": "L2.5-CapsLimits",
+              "name": "Caps & Limits",
+              "invariant_template": "total_deposit <= HARD_CAP",
+              "description": "Enforce hard caps to prevent economic attacks (whale dominance) or system overflows.",
+              "example_attack": "Whale dominance"
+            },
+            {
+              "id": "L2.5-ExistChecks",
+              "name": "ID & Existence Checks",
+              "invariant_template": "require(exists(tokenId))",
+              "description": "Target objects (e.g., TokenIDs) must exist and be valid before operation.",
+              "example_attack": "Operating on non-existent asset"
+            }
+          ]
+        }
+      }
+    },
+    "Level 3: Temporal, Liveness & Interaction Safety": {
+      "description": "Focuses on system evolution over time and interaction robustness in adversarial environments.",
+      "categories": {
+        "3.1 Liveness & Deadlock Freedom": {
+          "description": "The system must always advance to the next valid state and never permanently stall.",
+          "properties": [
+            {
+              "id": "L3.1-Termination",
+              "name": "Guaranteed Termination",
+              "invariant_template": "eventually(state == ENDED)",
+              "description": "Processes (like auctions) must eventually end; no infinite loops in state.",
+              "example_attack": "Forever active auction"
+            },
+            {
+              "id": "L3.1-Withdrawal",
+              "name": "Guaranteed Withdrawal",
+              "invariant_template": "eventually(user_can_withdraw_funds)",
+              "description": "User funds must be withdrawable eventually, even if the admin absconds or the system pauses.",
+              "example_attack": "Locked funds (Akutar)"
+            },
+            {
+              "id": "L3.1-AntiCensorship",
+              "name": "Oracle Censorship Resistance",
+              "invariant_template": "if (oracle_timeout) allow_fallback_mechanism",
+              "description": "Systems relying on oracles must have timeout/fallback mechanisms to prevent deadlock.",
+              "example_attack": "Frozen protocol due to Oracle failure"
+            }
+          ]
+        },
+        "3.2 DoS Resistance & Interaction Isolation": {
+          "description": "Malicious behavior should not block other honest users or global processes.",
+          "properties": [
+            {
+              "id": "L3.2-PullPattern",
+              "name": "Push vs Pull Pattern",
+              "invariant_template": "mapping(address => uint) pendingWithdrawals",
+              "description": "Prioritize Pull (user withdraws) over Push (contract sends) to prevent DoS by malicious receivers.",
+              "example_attack": "DoS via reverting fallback"
+            },
+            {
+              "id": "L3.2-ForcedEther",
+              "name": "Forced Ether Defense",
+              "invariant_template": "balance >= expected_amount (use >= not ==)",
+              "description": "Do not rely strictly on `address(this).balance` as `selfdestruct` can force Ether into the contract.",
+              "example_attack": "Breaking strict equality logic"
+            }
+          ]
+        },
+        "3.3 Temporal Constraints & Dynamic Adjustment": {
+          "description": "Operation validity depends on on-chain time, and windows may adjust dynamically.",
+          "properties": [
+            {
+              "id": "L3.3-TimeWindow",
+              "name": "Time Window Validity",
+              "invariant_template": "require(now >= start && now <= end)",
+              "description": "Operations outside the defined time window must be rejected.",
+              "example_attack": "Late submission acceptance"
+            },
+            {
+              "id": "L3.3-AntiSniping",
+              "name": "Dynamic Extension (Anti-Sniping)",
+              "invariant_template": "if (bid_time > end - buffer) end += extension",
+              "description": "Interactions near the deadline should extend the window to ensure fairness.",
+              "example_attack": "Last-second sniping"
+            }
+          ]
+        },
+        "3.4 Fairness & Race Condition Safety": {
+          "description": "Ensures transaction ordering does not cause severe unfairness in concurrent/high-latency environments.",
+          "properties": [
+            {
+              "id": "L3.4-FrontRunning",
+              "name": "Front-running Protection",
+              "invariant_template": "commit_reveal_scheme() or max_slippage_check()",
+              "description": "Protect against MEV bots inserting transactions to profit (e.g., sandwich attacks).",
+              "example_attack": "Sandwich attack"
+            },
+            {
+              "id": "L3.4-FIFO",
+              "name": "FIFO Fairness",
+              "invariant_template": "if (sold_out) revert(); // Late txs fail safely",
+              "description": "In limited resource scenarios, valid transactions before the cap is hit must succeed; late ones fail safely.",
+              "example_attack": "Unfair allocation"
+            }
+          ]
+        }
+      }
+    },
+    "Level 4: Economic & Mechanism Design Safety": {
+      "description": "Verifies if the mechanism incentivizes honest behavior and prevents strategic attacks (Game Theory level).",
+      "categories": {
+        "4.1 Incentive Compatibility (IC)": {
+          "description": "Designing mechanisms where honesty is the Dominant Strategy.",
+          "properties": [
+            {
+              "id": "L4.1-Participation",
+              "name": "Participation Incentive",
+              "invariant_template": "reward > gas_cost + opportunity_cost",
+              "description": "Incentives must cover gas and opportunity costs to prevent rational inaction by agents (e.g., Oracles).",
+              "example_attack": "Rational inaction / Stalled system"
+            },
+            {
+              "id": "L4.1-Slashing",
+              "name": "Slashing/Penalty Mechanism",
+              "invariant_template": "if (malicious_behavior_proven) slash(stake)",
+              "description": "Verifiable malicious behavior must trigger on-chain economic penalties.",
+              "example_attack": "Costless fraud"
+            }
+          ]
+        },
+        "4.2 Strategy-Proofness & Manipulation Resistance": {
+          "description": "Preventing unfair gains through complex strategies (e.g., fake bids, multiple identities).",
+          "properties": [
+            {
+              "id": "L4.2-Sybil",
+              "name": "Sybil Resistance",
+              "invariant_template": "cost(attack_n_identities) > profit",
+              "description": "The cost of creating fake identities must exceed the potential profit.",
+              "example_attack": "Gitcoin grant gaming"
+            },
+            {
+              "id": "L4.2-Commitment",
+              "name": "Commitment Binding",
+              "invariant_template": "assert(hash(reveal_value) == committed_hash)",
+              "description": "Users cannot dynamically change their decisions (e.g., bids) after committing to them.",
+              "example_attack": "Changing auction bid after reveal"
+            }
+          ]
+        },
+        "4.3 Price Discovery & Market Efficiency": {
+          "description": "Ensures price curves reflect supply/demand correctly without risk-free arbitrage.",
+          "properties": [
+            {
+              "id": "L4.3-Monotonicity",
+              "name": "Monotonicity & Convergence",
+              "invariant_template": "price(t+1) <= price(t) // For Dutch Auction",
+              "description": "Price functions must change monotonically and converge to fair value.",
+              "example_attack": "Manipulated price curve"
+            },
+            {
+              "id": "L4.3-NoArbitrage",
+              "name": "No Risk-Free Arbitrage",
+              "invariant_template": "profit_from_loop <= transaction_costs",
+              "description": "There should be no risk-free arbitrage paths within the system.",
+              "example_attack": "DeFi infinite looping"
+            }
+          ]
+        },
+        "4.4 Cooperative Game & Minority Protection": {
+          "description": "Handling conflicts in collective decision-making and preventing 'tyranny of the majority'.",
+          "properties": [
+            {
+              "id": "L4.4-ExitRight",
+              "name": "Exit Right (Ragequit)",
+              "invariant_template": "can_withdraw_share_during_grace_period()",
+              "description": "Individuals must be able to exit with their funds if the collective decision violates their interests.",
+              "example_attack": "MolochDAO raid"
+            },
+            {
+              "id": "L4.4-Bribery",
+              "name": "Bribery Resistance",
+              "invariant_template": "bribe_cost > potential_profit",
+              "description": "Increase bribery costs (e.g., via vote locking) to exceed malicious profits.",
+              "example_attack": "Vote buying"
+            }
+          ]
+        }
+      }
+    }
+  }

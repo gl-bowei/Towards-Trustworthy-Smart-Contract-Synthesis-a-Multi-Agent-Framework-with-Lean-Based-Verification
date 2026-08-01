@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="status" src="https://img.shields.io/badge/status-coming%20soon-orange">
+  <img alt="status" src="https://img.shields.io/badge/status-core%20code%20available-brightgreen">
   <img alt="venue" src="https://img.shields.io/badge/ACL-2026-blue">
   <img alt="type" src="https://img.shields.io/badge/research-prototype-purple">
 </p>
@@ -20,7 +20,9 @@
 > It integrates **LLM-based Solidity synthesis**, **Lean-based auto-formalization**, **formal proof search**, and **adversarial sandbox testing** into a closed-loop refinement pipeline.
 
 > [!IMPORTANT]
-> The codebase is currently being cleaned and organized for public release.
+> This repository currently provides the minimum public implementation of the
+> main requirement-to-Solidity pipeline. The paper-scale experiment and full
+> reproducibility package will be released separately.
 
 ---
 
@@ -73,6 +75,137 @@ At a high level, LeVer is built around four collaborative roles:
 
 ---
 
+## Core Code Release
+
+The public entry point exposes the requirement-to-Solidity workflow in three
+modes:
+
+| Mode | Lean | Foundry, semantic probe, agent simulation | Slither and LLM audit |
+|---|---|---|---|
+| `lean_only` | Yes; blocking | No | No |
+| `no_lean` | No | Yes; used by the iteration policy | Yes; reported only |
+| `full` | Yes; non-blocking | Yes; used by the iteration policy | Yes; reported only |
+
+All LLM requests use the exact model name `gpt-5`. The CLI rejects any other
+model name and the code implements no model fallback.
+
+### Prerequisites
+
+The release has been smoke-tested with:
+
+- Python 3.11 and `openai` 2.8.1;
+- Foundry (`forge` and `anvil`) 1.5.0;
+- Solidity compiler 0.8.33;
+- Lean 4.12.0, selected by the generated `lean-toolchain` file;
+- Slither 0.10.0 for the two non-Lean modes.
+
+Equivalent compatible versions may work, but have not been validated by this
+release. Ensure `git`, `forge`, `anvil`, and `lean` are on `PATH`; `full` and
+`no_lean` additionally require `slither`.
+
+### Installation
+
+From the repository root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+mkdir -p libs_cache
+git clone --depth 1 https://github.com/foundry-rs/forge-std.git \
+  libs_cache/forge-std
+git clone --depth 1 https://github.com/OpenZeppelin/openzeppelin-contracts.git \
+  libs_cache/openzeppelin-contracts
+```
+
+Slither is an external evaluation dependency and is intentionally separate from
+the main Python requirements:
+
+```bash
+python -m pip install "slither-analyzer==0.10.0"
+export SLITHER_COMMAND="$(pwd)/.venv/bin/slither"
+```
+
+If the Solidity libraries live elsewhere, set `SOLIDITY_LIB_PATH` to the
+directory containing `forge-std/` and `openzeppelin-contracts/`.
+
+### API Configuration
+
+Set the API key in the shell. `LLM_BASE_URL` is optional and should only point
+to an OpenAI-compatible endpoint that provides the exact `gpt-5` model.
+
+```bash
+export LLM_API_KEY="your-api-key"
+# Optional: export LLM_BASE_URL="https://api.openai.com/v1"
+```
+
+The code also accepts `OPENAI_API_KEY` when `LLM_API_KEY` is unset. Never commit
+API keys, `.env` files, or generated experiment artifacts.
+
+The account keys in `core/config.py` are the public, deterministic Anvil test
+accounts. They are only for the local sandbox: never fund them or use them on a
+live network.
+
+### Running the Three Modes
+
+Run commands from the repository root:
+
+```bash
+# Lean only
+python -m core.main_pipeline \
+  --mode lean_only \
+  --req-file examples/simple_counter_requirement.txt \
+  --exp-name quickstart \
+  --run-id lean
+
+# All non-Lean method stages
+python -m core.main_pipeline \
+  --mode no_lean \
+  --req-file examples/simple_counter_requirement.txt \
+  --exp-name quickstart \
+  --run-id no_lean
+
+# Lean and all non-Lean method stages
+python -m core.main_pipeline \
+  --mode full \
+  --req-file examples/simple_counter_requirement.txt \
+  --exp-name quickstart \
+  --run-id full
+```
+
+Use `python -m core.main_pipeline --help` for iteration, attack-round, model,
+and Slither-command options. Each run creates an isolated workspace at
+`experiments/<exp-name>/<run-id>/`.
+
+### Outputs and Decision Policy
+
+The main output is `result.json`, which records the selected mode, requested
+model, decision policy, and separate Lean, non-Lean, and external-evaluation
+outcomes. Each workspace also contains per-iteration metrics, `Target.sol`, a
+checkpoint, execution logs, and the generated Foundry and Lean workspaces when
+enabled.
+
+The public pipeline preserves the original lenient policy, recorded as
+`legacy_core_lenient`:
+
+- Foundry and the default semantic-probe policy can trigger another iteration.
+- Lean must pass in `lean_only`; incomplete Lean proofs are non-blocking in
+  `full` and are recorded separately.
+- Slither and the LLM audit are external experiment measurements. They do not
+  trigger repair or determine the iteration result.
+- Agent infrastructure failure may be accepted when no concrete breach was
+  observed, matching the original core implementation.
+
+A `passed: true` result means only that the configured criteria passed under
+this policy. It is not a proof that a generated contract is secure, and no
+generated contract should be deployed without independent review and testing.
+The exact smoke configuration, results, and known limitations are documented in
+[`SMOKE_RESULTS.md`](SMOKE_RESULTS.md).
+
+---
+
 ## Main Results
 
 LeVer consistently improves both **trustworthiness assurance** and **standard correctness** across frontier foundation models.
@@ -86,4 +219,3 @@ LeVer consistently improves both **trustworthiness assurance** and **standard co
 - It consistently improves **Verification Rate (VR)** and the **average number of verified properties**, showing stronger formal assurance.
 - These gains also translate into better practical correctness, with improved **Slither** and **Foundry** pass rates.
 - Ablation results further show that the **Verifier** and **Attacker** play complementary roles: the verifier strengthens formal guarantees, while the attacker exposes hard-to-prove dynamic vulnerabilities and feeds them back into refinement.
-

@@ -1,0 +1,11 @@
+.venv-slither/
+.venv/
+experiments/
+libs_cache/
+logs/
+.env
+.env.*
+__pycache__/
+*.py[cod]
+*.log
+.DS_Store

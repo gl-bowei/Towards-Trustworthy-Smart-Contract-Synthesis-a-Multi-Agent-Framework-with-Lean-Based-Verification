@@ -1,0 +1,7 @@
+Implement a single-file Solidity 0.8.20 contract named SimpleCounter.
+
+The contract must expose a public unsigned integer named count. Anyone may call
+increment() to increase count by exactly one. Anyone may call decrement() to
+decrease count by exactly one, but decrement() must revert when count is zero.
+The contract must make no external calls, hold no Ether or tokens, and have no
+owner, administrator, whitelist, or privileged role.
